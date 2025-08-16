@@ -6,6 +6,7 @@ import {
   computeWindow,
   getGuildSettings,
   upsertGuildSettings,
+  getAllGuildSettings,
   setCommandRole,
   getCommandRole,
   upsertUserAlertMinutes,
@@ -23,14 +24,22 @@ import {
   toUnixSeconds
 } from '../utils/time.js';
 
-import { EmbedBuilder, PermissionFlagsBits } from 'discord.js';
+import {
+  EmbedBuilder,
+  PermissionFlagsBits,
+  ActionRowBuilder,
+  StringSelectMenuBuilder,
+  ChannelSelectMenuBuilder,
+  RoleSelectMenuBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ChannelType
+} from 'discord.js';
 
 // ---------- helpers ----------
-
 function titleCase(s) {
   return s?.trim().replace(/\s+/g, ' ').replace(/\b\w/g, m => m.toUpperCase()) || '';
 }
-
 function ensureBossExists(bossName) {
   const boss = getBossByName(bossName);
   if (!boss) {
@@ -39,28 +48,19 @@ function ensureBossExists(bossName) {
   }
   return { boss };
 }
-
-// Role gate: returns true if allowed
 function isAllowedForStandard(interaction, commandName) {
   const gs = getGuildSettings(interaction.guildId);
   const explicitRole = getCommandRole(interaction.guildId, commandName);
   const roleToCheck = explicitRole || gs?.standard_role_id;
-  if (!roleToCheck) return true; // anyone can use
+  if (!roleToCheck) return true;
   return interaction.member.roles.cache.has(roleToCheck);
 }
-
-// Admin gate
 function isAdminAllowed(interaction) {
   const gs = getGuildSettings(interaction.guildId);
-  if (gs?.admin_role_id) {
-    return interaction.member.roles.cache.has(gs.admin_role_id);
-  }
+  if (gs?.admin_role_id) return interaction.member.roles.cache.has(gs.admin_role_id);
   return interaction.member.permissions.has(PermissionFlagsBits.ManageGuild);
 }
-
-// Formatting helpers
-const NBSP_TILDE = '\u00A0~\u00A0'; // keeps Start~End on one line (reduces wrapping)
-
+const NBSP_TILDE = '\u00A0~\u00A0';
 function formatRespawnPattern(min, max) {
   const nMin = Number(min);
   const nMax = Number(max);
@@ -69,14 +69,11 @@ function formatRespawnPattern(min, max) {
   }
   return `${min}–${max} hours after death`;
 }
-
 function renderWindowFields(boss, window) {
-  // min==max → single time; else Start~End (with non-breaking spaces around ~)
   const min = Number(boss.respawn_min_hours);
   const max = Number(boss.respawn_max_hours);
   const startUnix = toUnixSeconds(window.start);
   const endUnix   = toUnixSeconds(window.end);
-
   if (!Number.isNaN(min) && !Number.isNaN(max) && min === max) {
     return {
       name: 'Respawn Time',
@@ -95,25 +92,53 @@ function renderWindowFields(boss, window) {
   };
 }
 
-function dropsField(boss) {
-  const drops = (boss.drops || []);
-  const value = drops.length ? drops.map(d => `• ${d}`).join('\n') : '-';
-  // Discord field limit is 1024 chars; trim defensively
-  return { name: 'Drops', value: value.slice(0, 1024) };
-}
-
-function ensureDefaultAlertMinutes(userId, guildId, def = 30) {
-  const reg = getUserRegistration(userId, guildId);
-  if (!reg || reg.alert_minutes == null) {
-    upsertUserAlertMinutes(userId, guildId, def);
-    return true; // default applied
+// ---------- dashboard embed builder (exported for updater) ----------
+export function buildUpcomingEmbed(hours) {
+  const rows = getAllBossRows();
+  const now = nowUtc();
+  const horizon = now.plus({ hours });
+  const candidates = [];
+  for (const b of rows) {
+    if (!b.last_killed_at_utc) continue;
+    const w = computeWindow(b);
+    if (!w || w.end <= now) continue;
+    candidates.push({ boss: b, window: w });
   }
-  return false;  // already had a value
+  candidates.sort((a, b) => {
+    const aStart = a.window.start < now ? now : a.window.start;
+    const bStart = b.window.start < now ? now : b.window.start;
+    return aStart.toMillis() - bStart.toMillis();
+  });
+  const within = candidates.filter(c => c.window.start <= horizon);
+  const top3 = candidates.slice(0, 3);
+  const pick = within.length > top3.length ? within : top3;
+
+  const fields = pick.length ? pick.map(({ boss, window }) => {
+    const min = Number(boss.respawn_min_hours);
+    const max = Number(boss.respawn_max_hours);
+    const single = (!Number.isNaN(min) && !Number.isNaN(max) && min === max);
+    const startUnix = toUnixSeconds(window.start);
+    const endUnix = toUnixSeconds(window.end);
+
+    const value = single
+      ? [
+          `**Your Time:** <t:${startUnix}:f>`,
+          `**Server Time (UTC):** ${fmtUtc(window.start)}`
+        ].join('\n')
+      : [
+          `**Your Time:** <t:${startUnix}:f>${NBSP_TILDE}<t:${endUnix}:f>`,
+          `**Server Time (UTC):** ${fmtUtc(window.start)} ~ ${fmtUtc(window.end)}`
+        ].join('\n');
+    return { name: boss.name, value };
+  }) : [{ name: 'No tracked windows', value: 'Use /killed to start a timer.' }];
+
+  return new EmbedBuilder()
+    .setTitle(`Upcoming Spawns - next ${hours}h`)
+    .addFields(fields)
+    .setColor(0x00A8FF);
 }
 
-// ---------- commands ----------
-
-// /listbosses
+// ---------- commands (existing, trimmed to those affected + setup) ----------
 export async function handleListBosses(interaction) {
   const names = listBosses();
   const embed = new EmbedBuilder()
@@ -123,118 +148,10 @@ export async function handleListBosses(interaction) {
   return interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
-// /subscribe boss <boss>
-export async function handleSubscribeBoss(interaction) {
-  if (!isAllowedForStandard(interaction, 'subscribe')) {
-    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /subscribe.' });
-  }
-  const bossName = titleCase(interaction.options.getString('boss', true));
-  const check = ensureBossExists(bossName);
-  if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
-  const boss = check.boss;
-
-  addSubscription(interaction.user.id, interaction.guildId, boss.name);
-  const defaulted = ensureDefaultAlertMinutes(interaction.user.id, interaction.guildId, 30);
-
-  const current = listUserSubscriptions(interaction.user.id, interaction.guildId);
-  const desc = current.length ? current.map(b => `• ${b}`).join('\n') : 'None';
-
-  const embed = new EmbedBuilder()
-    .setTitle('Subscribed to Boss')
-    .setDescription(`You will receive DM alerts for **${boss.name}**.` + (defaulted ? `\nDefault alert lead time set to **30 minutes**. Adjust with **/setalert**.` : ''))
-    .addFields({ name: 'Your Subscriptions', value: desc })
-    .setColor(0x1ABC9C);
-
-  return interaction.reply({ embeds: [embed], ephemeral: true });
-}
-
-// /subscribe all
-export async function handleSubscribeAll(interaction) {
-  if (!isAllowedForStandard(interaction, 'subscribe')) {
-    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /subscribe.' });
-  }
-
-  const bosses = listBosses();
-  for (const name of bosses) addSubscription(interaction.user.id, interaction.guildId, name);
-  const defaulted = ensureDefaultAlertMinutes(interaction.user.id, interaction.guildId, 30);
-
-  const current = listUserSubscriptions(interaction.user.id, interaction.guildId);
-  const desc = current.length ? current.map(b => `• ${b}`).join('\n') : 'None';
-
-  const embed = new EmbedBuilder()
-    .setTitle('Subscribed to All Bosses')
-    .setDescription(`You will receive DM alerts for **all bosses**.` + (defaulted ? `\nDefault alert lead time set to **30 minutes**. Adjust with **/setalert**.` : ''))
-    .addFields({ name: 'Your Subscriptions', value: desc })
-    .setColor(0x1ABC9C);
-
-  return interaction.reply({ embeds: [embed], ephemeral: true });
-}
-
-// /unsubscribe boss <boss>
-export async function handleUnsubscribeBoss(interaction) {
-  if (!isAllowedForStandard(interaction, 'unsubscribe')) {
-    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /unsubscribe.' });
-  }
-  const bossName = titleCase(interaction.options.getString('boss', true));
-  const check = ensureBossExists(bossName);
-  if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
-  const boss = check.boss;
-
-  const removed = removeSubscription(interaction.user.id, interaction.guildId, boss.name);
-
-  const current = listUserSubscriptions(interaction.user.id, interaction.guildId);
-  const desc = current.length ? current.map(b => `• ${b}`).join('\n') : 'None';
-
-  const embed = new EmbedBuilder()
-    .setTitle(removed ? 'Unsubscribed from Boss' : 'Not Subscribed')
-    .setDescription(removed ? `You will no longer receive alerts for **${boss.name}**.` : `You were not subscribed to **${boss.name}**.`)
-    .addFields({ name: 'Your Subscriptions', value: desc })
-    .setColor(removed ? 0xE17055 : 0x95A5A6);
-
-  return interaction.reply({ embeds: [embed], ephemeral: true });
-}
-
-// /unsubscribe all
-export async function handleUnsubscribeAll(interaction) {
-  if (!isAllowedForStandard(interaction, 'unsubscribe')) {
-    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /unsubscribe.' });
-  }
-
-  const current = listUserSubscriptions(interaction.user.id, interaction.guildId);
-  for (const name of current) removeSubscription(interaction.user.id, interaction.guildId, name);
-
-  const embed = new EmbedBuilder()
-    .setTitle('Unsubscribed from All Bosses')
-    .setDescription('You will no longer receive DM alerts for any boss.')
-    .addFields({ name: 'Your Subscriptions', value: 'None' })
-    .setColor(0xE17055);
-
-  return interaction.reply({ embeds: [embed], ephemeral: true });
-}
-
-// /subscriptions - list user's current subscriptions
-export async function handleSubscriptions(interaction) {
-  if (!isAllowedForStandard(interaction, 'subscriptions')) {
-    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /subscriptions.' });
-  }
-
-  const subs = listUserSubscriptions(interaction.user.id, interaction.guildId);
-  const desc = subs.length ? subs.map(b => `• ${b}`).join('\n') : 'None';
-
-  const embed = new EmbedBuilder()
-    .setTitle('Your Subscriptions')
-    .setDescription(desc)
-    .setColor(0x8E44AD);
-
-  return interaction.reply({ embeds: [embed], ephemeral: true });
-}
-
-// /killed
 export async function handleKilled(interaction) {
   if (!isAllowedForStandard(interaction, 'killed')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /killed.' });
   }
-
   const bossName = titleCase(interaction.options.getString('boss', true));
   const timeStr = interaction.options.getString('server_time_hhmm', false);
   const check = ensureBossExists(bossName);
@@ -247,7 +164,6 @@ export async function handleKilled(interaction) {
     if (!parsed) {
       return interaction.reply({ ephemeral: true, content: 'Invalid time format. Use HH:MM in UTC, e.g. 21:22' });
     }
-    // If HH:MM UTC is still in the future "today", assume they meant yesterday.
     deathUtc = parsed > nowUtc() ? parsed.minus({ days: 1 }) : parsed;
   }
 
@@ -268,7 +184,6 @@ export async function handleKilled(interaction) {
       ].join('\n')
     }
   ];
-
   if (window) fields.push(renderWindowFields(updated, window));
 
   const embed = new EmbedBuilder()
@@ -280,106 +195,46 @@ export async function handleKilled(interaction) {
   return interaction.reply({ embeds: [embed] });
 }
 
-// /status
 export async function handleStatus(interaction) {
   if (!isAllowedForStandard(interaction, 'status')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /status.' });
   }
-
   const bossName = titleCase(interaction.options.getString('boss', true));
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
   const boss = check.boss;
 
-  // Helper to decide label based on min/max
-  const min = Number(boss.respawn_min_hours);
-  const max = Number(boss.respawn_max_hours);
-  const showSingle = (!Number.isNaN(min) && !Number.isNaN(max) && min === max);
-  const windowLabel = showSingle ? 'Respawn Time' : 'Respawn Window';
-
-  // Unknown state: keep ONLY the two sections
   if (!boss.last_killed_at_utc) {
     const embed = new EmbedBuilder()
       .setTitle(`${boss.name} Status`)
       .addFields(
-        {
-          name: 'Last Death',
-          value: [
-            `**Your Time:** Unknown`,
-            `**Server Time (UTC):** Unknown`
-          ].join('\n')
-        },
-        showSingle
-          ? {
-              name: windowLabel,
-              value: [
-                `**Your Time:** Unknown`,
-                `**Server Time (UTC):** Unknown`
-              ].join('\n')
-            }
-          : {
-              name: windowLabel,
-              value: [
-                `**Your Time:** Unknown`,
-                `**Server Time (UTC):** Unknown`
-              ].join('\n')
-            }
+        { name: 'Last Death', value: `**Your Time:** Unknown\n**Server Time (UTC):** Unknown` },
+        { name: 'Respawn Window', value: `**Your Time:** Unknown\n**Server Time (UTC):** Unknown` }
       )
       .setColor(0xD63031);
-
     return interaction.reply({ embeds: [embed] });
   }
 
-  // Known state
   const window = computeWindow(boss);
   const killedUnix = toUnixSeconds(window.killed);
-
-  // Use :f to match “August 16, 2025 1:30 AM” style
-  const lastDeathField = {
+  const last = {
     name: 'Last Death',
-    value: [
-      `**Your Time:** <t:${killedUnix}:f>`,
-      `**Server Time (UTC):** ${fmtUtc(window.killed)}`
-    ].join('\n')
+    value: `**Your Time:** <t:${killedUnix}:f>\n**Server Time (UTC):** ${fmtUtc(window.killed)}`
   };
-
-  let windowField;
-  if (showSingle) {
-    const startUnix = toUnixSeconds(window.start);
-    windowField = {
-      name: 'Respawn Time',
-      value: [
-        `**Your Time:** <t:${startUnix}:f>`,
-        `**Server Time (UTC):** ${fmtUtc(window.start)}`
-      ].join('\n')
-    };
-  } else {
-    const NBSP_TILDE = '\u00A0~\u00A0'; // keep the two times together
-    const startUnix = toUnixSeconds(window.start);
-    const endUnix   = toUnixSeconds(window.end);
-    windowField = {
-      name: 'Respawn Window',
-      value: [
-        `**Your Time:** <t:${startUnix}:f>${NBSP_TILDE}<t:${endUnix}:f>`,
-        `**Server Time (UTC):** ${fmtUtc(window.start)} ~ ${fmtUtc(window.end)}`
-      ].join('\n')
-    };
-  }
+  const resp = renderWindowFields(boss, window);
 
   const embed = new EmbedBuilder()
     .setTitle(`${boss.name} Status`)
-    .addFields(lastDeathField, windowField)
+    .addFields(last, resp)
     .setColor(0x0984E3);
 
   return interaction.reply({ embeds: [embed] });
 }
 
-// /details  (now includes Drops per your latest request)
 export async function handleDetails(interaction) {
   if (!isAllowedForStandard(interaction, 'details')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /details.' });
   }
-
   const bossName = titleCase(interaction.options.getString('boss', true));
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
@@ -393,15 +248,11 @@ export async function handleDetails(interaction) {
 
   if (Array.isArray(b.parts) && b.parts.length) {
     for (const part of b.parts) {
-      const statsLines = Object.entries(part.stats || {})
-        .map(([k, v]) => `**${k}**: ${v}`)
-        .join('\n') || '-';
+      const statsLines = Object.entries(part.stats || {}).map(([k, v]) => `**${k}**: ${v}`).join('\n') || '-';
       fields.push({ name: `Stats - ${part.name}`, value: statsLines });
     }
   } else {
-    const statsLines = Object.entries(b.stats || {})
-      .map(([k, v]) => `**${k}**: ${v}`)
-      .join('\n') || '-';
+    const statsLines = Object.entries(b.stats || {}).map(([k, v]) => `**${k}**: ${v}`).join('\n') || '-';
     fields.push({ name: 'Stats', value: statsLines });
   }
 
@@ -411,15 +262,12 @@ export async function handleDetails(interaction) {
 
   return interaction.reply({
     embeds: [
-      new EmbedBuilder()
-        .setTitle(`${b.name} - Details`)
-        .addFields(fields)
-        .setColor(0x6C5CE7)
+      new EmbedBuilder().setTitle(`${b.name} - Details`).addFields(fields).setColor(0x6C5CE7)
     ]
   });
 }
 
-// /drops (unchanged - already dedicated to drop list)
+// /drops
 export async function handleDrops(interaction) {
   if (!isAllowedForStandard(interaction, 'drops')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /drops.' });
@@ -431,16 +279,10 @@ export async function handleDrops(interaction) {
   const drops = (b.drops || []).map(d => `• ${d}`).join('\n') || '-';
 
   return interaction.reply({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle(`${b.name} - Drops`)
-        .setDescription(drops.slice(0, 4096)) // description limit
-        .setColor(0x00CEC9)
-    ]
+    embeds: [ new EmbedBuilder().setTitle(`${b.name} - Drops`).setDescription(drops.slice(0, 4096)).setColor(0x00CEC9) ]
   });
 }
 
-// /reset
 export async function handleReset(interaction) {
   if (!isAdminAllowed(interaction)) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /reset.' });
@@ -448,147 +290,166 @@ export async function handleReset(interaction) {
   const bossName = titleCase(interaction.options.getString('boss', true));
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
-  const boss = check.boss;
 
-  const ok = resetBoss(boss.name);
+  const ok = resetBoss(check.boss.name);
   if (!ok) return interaction.reply({ ephemeral: true, content: 'Failed to reset boss.' });
 
-  const embed = new EmbedBuilder()
-    .setTitle(`Reset: ${boss.name}`)
-    .setDescription('Respawn timer cleared. Status is now **Unknown**.')
-    .setColor(0xE17055);
-
-  return interaction.reply({ embeds: [embed] });
+  return interaction.reply({
+    embeds: [ new EmbedBuilder().setTitle(`Reset: ${check.boss.name}`).setDescription('Respawn timer cleared. Status is now **Unknown**.').setColor(0xE17055) ]
+  });
 }
 
-// /setup
-export async function handleSetup(interaction) {
-  if (!isAdminAllowed(interaction)) {
-    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /setup.' });
+// /subscribe boss
+export async function handleSubscribeBoss(interaction) {
+  if (!isAllowedForStandard(interaction, 'subscribe')) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /subscribe.' });
   }
-  const channel = interaction.options.getChannel('alert_channel', false);
-  const adminRole = interaction.options.getRole('admin_role', false);
-  const standardRole = interaction.options.getRole('standard_role', false);
+  const bossName = titleCase(interaction.options.getString('boss', true));
+  const check = ensureBossExists(bossName);
+  if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
+  const boss = check.boss;
 
-  upsertGuildSettings(interaction.guildId, {
-    alert_channel_id: channel?.id ?? null,
-    admin_role_id: adminRole?.id ?? null,
-    standard_role_id: standardRole?.id ?? null
-  });
+  addSubscription(interaction.user.id, interaction.guildId, boss.name);
+  const reg = getUserRegistration(interaction.user.id, interaction.guildId);
+  if (!reg || reg.alert_minutes == null) upsertUserAlertMinutes(interaction.user.id, interaction.guildId, 30);
 
+  const current = listUserSubscriptions(interaction.user.id, interaction.guildId);
+  const desc = current.length ? current.map(b => `• ${b}`).join('\n') : 'None';
+  const embed = new EmbedBuilder()
+    .setTitle('Subscribed to Boss')
+    .setDescription(`You will receive DM alerts for **${boss.name}**.\n(Default lead time **30 minutes** unless changed via /setalert)`)
+    .addFields({ name: 'Your Subscriptions', value: desc })
+    .setColor(0x1ABC9C);
+
+  return interaction.reply({ embeds: [embed], ephemeral: true });
+}
+export async function handleSubscribeAll(interaction) {
+  if (!isAllowedForStandard(interaction, 'subscribe')) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /subscribe.' });
+  }
+  const bosses = listBosses();
+  for (const name of bosses) addSubscription(interaction.user.id, interaction.guildId, name);
+  const reg = getUserRegistration(interaction.user.id, interaction.guildId);
+  if (!reg || reg.alert_minutes == null) upsertUserAlertMinutes(interaction.user.id, interaction.guildId, 30);
+
+  const current = listUserSubscriptions(interaction.user.id, interaction.guildId);
+  const desc = current.length ? current.map(b => `• ${b}`).join('\n') : 'None';
   return interaction.reply({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle('Setup complete')
-        .setDescription(
-          `Alerts Channel: ${channel ? `<#${channel.id}>` : 'not set'}\n` +
-          `Admin Role: ${adminRole ? `<@&${adminRole.id}>` : 'not set'}\n` +
-          `Standard Role (gate): ${standardRole ? `<@&${standardRole.id}>` : 'not set'}`
-        )
-        .setColor(0x2ECC71)
-    ],
+    embeds: [ new EmbedBuilder().setTitle('Subscribed to All Bosses').setDescription('You will receive DM alerts for **all bosses**.').addFields({ name: 'Your Subscriptions', value: desc }).setColor(0x1ABC9C) ],
     ephemeral: true
   });
 }
-
-// /setcommandrole
-export async function handleSetCommandRole(interaction) {
-  if (!isAdminAllowed(interaction)) {
-    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /setcommandrole.' });
+export async function handleUnsubscribeBoss(interaction) {
+  if (!isAllowedForStandard(interaction, 'unsubscribe')) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /unsubscribe.' });
   }
-  const commandName = interaction.options.getString('command', true);
-  const role = interaction.options.getRole('role', true);
-  setCommandRole(interaction.guildId, commandName, role.id);
-  return interaction.reply({ ephemeral: true, content: `Set role for /${commandName} to ${role}.` });
+  const bossName = titleCase(interaction.options.getString('boss', true));
+  const check = ensureBossExists(bossName);
+  if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
+
+  const removed = removeSubscription(interaction.user.id, interaction.guildId, check.boss.name);
+  const current = listUserSubscriptions(interaction.user.id, interaction.guildId);
+  const desc = current.length ? current.map(b => `• ${b}`).join('\n') : 'None';
+
+  const embed = new EmbedBuilder()
+    .setTitle(removed ? 'Unsubscribed from Boss' : 'Not Subscribed')
+    .setDescription(removed ? `You will no longer receive alerts for **${check.boss.name}**.` : `You were not subscribed to **${check.boss.name}**.`)
+    .addFields({ name: 'Your Subscriptions', value: desc })
+    .setColor(removed ? 0xE17055 : 0x95A5A6);
+
+  return interaction.reply({ embeds: [embed], ephemeral: true });
+}
+export async function handleUnsubscribeAll(interaction) {
+  if (!isAllowedForStandard(interaction, 'unsubscribe')) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /unsubscribe.' });
+  }
+  const current = listUserSubscriptions(interaction.user.id, interaction.guildId);
+  for (const name of current) removeSubscription(interaction.user.id, interaction.guildId, name);
+
+  return interaction.reply({
+    embeds: [ new EmbedBuilder().setTitle('Unsubscribed from All Bosses').setDescription('You will no longer receive DM alerts for any boss.').addFields({ name: 'Your Subscriptions', value: 'None' }).setColor(0xE17055) ],
+    ephemeral: true
+  });
+}
+export async function handleSubscriptions(interaction) {
+  if (!isAllowedForStandard(interaction, 'subscriptions')) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /subscriptions.' });
+  }
+  const subs = listUserSubscriptions(interaction.user.id, interaction.guildId);
+  const desc = subs.length ? subs.map(b => `• ${b}`).join('\n') : 'None';
+  return interaction.reply({ embeds: [ new EmbedBuilder().setTitle('Your Subscriptions').setDescription(desc).setColor(0x8E44AD) ], ephemeral: true });
 }
 
-// /setalert minutes => only updates lead time (no auto-subscribe)
-export async function handleSetAlert(interaction) {
-  const minutes = interaction.options.getInteger('minutes', true);
-  if (minutes < 1 || minutes > 1440) {
-    return interaction.reply({ ephemeral: true, content: 'Minutes must be between 1 and 1440.' });
-  }
-  upsertUserAlertMinutes(interaction.user.id, interaction.guildId, minutes);
-  return interaction.reply({ ephemeral: true, content: `DM alert lead time set to **~${minutes} minutes** before a subscribed boss window.` });
-}
-
-// /upcoming — next 3 overall OR everyone starting within N hours (default 3)
+// /upcoming - dynamic hours
 export async function handleUpcoming(interaction) {
   if (!isAllowedForStandard(interaction, 'upcoming')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /upcoming.' });
   }
-
   const hoursArg = interaction.options.getInteger('hours', false);
   const hours = (typeof hoursArg === 'number' ? hoursArg : 3);
-  const NBSP_TILDE = '\u00A0~\u00A0';
-
-  const now = nowUtc();
-  const horizon = now.plus({ hours });
-
-  // Build candidate windows from bosses that have a known last death and a window not yet ended
-  const rows = getAllBossRows();
-  const candidates = [];
-  for (const b of rows) {
-    if (!b.last_killed_at_utc) continue;
-    const w = computeWindow(b);
-    if (w.end <= now) continue; // window already ended
-    candidates.push({ boss: b, window: w });
-  }
-
-  if (!candidates.length) {
-    return interaction.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setTitle(`Upcoming Spawns`)
-          .setDescription('No upcoming spawn windows are tracked yet.')
-          .setColor(0x95A5A6)
-      ],
-      ephemeral: true
-    });
-  }
-
-  // Sort by effective start time (current windows first, then soonest)
-  candidates.sort((a, b) => {
-    const aStart = a.window.start < now ? now : a.window.start;
-    const bStart = b.window.start < now ? now : b.window.start;
-    return aStart.toMillis() - bStart.toMillis();
-  });
-
-  // Group A: all starting by horizon (or already open)
-  const withinNh = candidates.filter(c => c.window.start <= horizon);
-
-  // Group B: top 3 overall
-  const top3 = candidates.slice(0, 3);
-
-  // Pick whichever set is larger
-  const pick = withinNh.length > top3.length ? withinNh : top3;
-
-  // Build fields (no relative times; show single time if min==max)
-  const fields = pick.map(({ boss, window }) => {
-    const min = Number(boss.respawn_min_hours);
-    const max = Number(boss.respawn_max_hours);
-    const single = (!Number.isNaN(min) && !Number.isNaN(max) && min === max);
-
-    const startUnix = toUnixSeconds(window.start);
-    const endUnix = toUnixSeconds(window.end);
-
-    const value = single
-      ? [
-          `**Your Time:** <t:${startUnix}:f>`,
-          `**Server Time (UTC):** ${fmtUtc(window.start)}`
-        ].join('\n')
-      : [
-          `**Your Time:** <t:${startUnix}:f>${NBSP_TILDE}<t:${endUnix}:f>`,
-          `**Server Time (UTC):** ${fmtUtc(window.start)} ~ ${fmtUtc(window.end)}`
-        ].join('\n');
-
-    return { name: boss.name, value };
-  });
-
-  const embed = new EmbedBuilder()
-    .setTitle(`Upcoming Spawns — next ${hours}h`)
-    .addFields(...fields)
-    .setColor(0x00A8FF);
-
+  const embed = buildUpcomingEmbed(hours);
   return interaction.reply({ embeds: [embed] });
+}
+
+// ---------- Setup Wizard ----------
+export async function handleSetup(interaction) {
+  if (!isAdminAllowed(interaction)) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /setup.' });
+  }
+
+  const gs = getGuildSettings(interaction.guildId) || {};
+  const emb = new EmbedBuilder()
+    .setTitle('Boss Alerts - Setup Wizard')
+    .setDescription([
+      'Use the menus below to configure:',
+      '1) **Alert Channel** for the dashboard & pings',
+      '2) **Ping Role** to mention when a window is near',
+      '3) **Lookahead Hours** for the dashboard',
+      '4) **Ping Lead Minutes** before a window opens',
+      '',
+      'Click **Create/Update Dashboard Message** when you’re done.'
+    ].join('\n'))
+    .addFields(
+      { name: 'Current Alert Channel', value: gs.alert_channel_id ? `<#${gs.alert_channel_id}>` : '-', inline: true },
+      { name: 'Current Ping Role', value: gs.ping_role_id ? `<@&${gs.ping_role_id}>` : '-', inline: true },
+      { name: 'Lookahead Hours', value: String(gs.upcoming_hours ?? 3), inline: true },
+      { name: 'Ping Lead Minutes', value: String(gs.ping_minutes ?? 30), inline: true }
+    )
+    .setColor(0x2ECC71);
+
+  const row1 = new ActionRowBuilder().addComponents(
+    new ChannelSelectMenuBuilder()
+      .setCustomId('setup:channel')
+      .setPlaceholder('Select alert channel')
+      .addChannelTypes(ChannelType.GuildText)
+      .setMinValues(1).setMaxValues(1)
+  );
+  const row2 = new ActionRowBuilder().addComponents(
+    new RoleSelectMenuBuilder()
+      .setCustomId('setup:role')
+      .setPlaceholder('Select ping role (optional)')
+      .setMinValues(0).setMaxValues(1)
+  );
+  const row3 = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId('setup:hours')
+      .setPlaceholder('Select lookahead hours for dashboard')
+      .addOptions([1,3,6,12,24].map(h => ({ label: `${h} hour${h===1?'':'s'}`, value: String(h) })))
+      .setMinValues(1).setMaxValues(1)
+  );
+  const row4 = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId('setup:minutes')
+      .setPlaceholder('Select ping lead minutes')
+      .addOptions([5,10,15,30,60,120].map(m => ({ label: `${m} minutes`, value: String(m) })))
+      .setMinValues(1).setMaxValues(1)
+  );
+  const row5 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('setup:make_message')
+      .setLabel('Create/Update Dashboard Message')
+      .setStyle(ButtonStyle.Primary)
+  );
+
+  return interaction.reply({ embeds: [emb], components: [row1, row2, row3, row4, row5], ephemeral: true });
 }

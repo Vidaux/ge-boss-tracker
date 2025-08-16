@@ -7,7 +7,7 @@ const DB_PATH = path.join(process.cwd(), 'ge-boss-bot.sqlite');
 const db = new Database(DB_PATH);
 
 // --------------------------
-// Schema & lightweight migrations
+// Schema & migrations
 // --------------------------
 db.exec(`
 CREATE TABLE IF NOT EXISTS bosses (
@@ -28,7 +28,11 @@ CREATE TABLE IF NOT EXISTS guild_settings (
   guild_id TEXT PRIMARY KEY,
   alert_channel_id TEXT,
   admin_role_id TEXT,
-  standard_role_id TEXT
+  standard_role_id TEXT,
+  upcoming_hours INTEGER,      -- NEW: lookahead for dashboard
+  ping_role_id TEXT,           -- NEW: role to @mention
+  ping_minutes INTEGER,        -- NEW: minutes before start to ping
+  alert_message_id TEXT        -- NEW: dashboard message id to edit
 );
 
 CREATE TABLE IF NOT EXISTS command_roles (
@@ -41,8 +45,8 @@ CREATE TABLE IF NOT EXISTS command_roles (
 CREATE TABLE IF NOT EXISTS user_registrations (
   user_id TEXT,
   guild_id TEXT,
-  timezone TEXT,         -- unused; kept for backward compatibility
-  alert_minutes INTEGER, -- per-user alert lead time
+  timezone TEXT,
+  alert_minutes INTEGER,
   PRIMARY KEY (user_id, guild_id)
 );
 
@@ -61,13 +65,28 @@ CREATE TABLE IF NOT EXISTS user_subscriptions (
   boss_name TEXT,
   PRIMARY KEY (user_id, guild_id, boss_name)
 );
+
+/* NEW: channel-level ping tracking to avoid duplicate pings per window */
+CREATE TABLE IF NOT EXISTS channel_alerts (
+  guild_id TEXT,
+  boss_name TEXT,
+  window_key TEXT,
+  pinged INTEGER,
+  PRIMARY KEY (guild_id, boss_name, window_key)
+);
 `);
 
-// Lightweight migration (safe if column already exists)
-try { db.prepare(`ALTER TABLE bosses ADD COLUMN parts_json TEXT`).run(); } catch { /* already exists */ }
+// lightweight add-columns (safe if already exist)
+for (const sql of [
+  `ALTER TABLE bosses ADD COLUMN parts_json TEXT`,
+  `ALTER TABLE guild_settings ADD COLUMN upcoming_hours INTEGER`,
+  `ALTER TABLE guild_settings ADD COLUMN ping_role_id TEXT`,
+  `ALTER TABLE guild_settings ADD COLUMN ping_minutes INTEGER`,
+  `ALTER TABLE guild_settings ADD COLUMN alert_message_id TEXT`
+]) { try { db.prepare(sql).run(); } catch { /* ignore */ } }
 
 // --------------------------
-// Seeding
+// Seeding bosses
 // --------------------------
 const insertBoss = db.prepare(`
   INSERT OR IGNORE INTO bosses
@@ -122,7 +141,7 @@ export function getBossByName(bossName) {
     stats: JSON.parse(row.stats_json || '{}'),
     drops: JSON.parse(row.drops_json || '[]'),
     respawn_notes: JSON.parse(row.respawn_notes_json || '[]'),
-    parts: JSON.parse(row.parts_json || 'null') // array or null
+    parts: JSON.parse(row.parts_json || 'null')
   };
 }
 
@@ -141,7 +160,6 @@ export function getAllBossRows() {
   }));
 }
 
-// Compute window using UTC; supports fractional hours (e.g., 10.5)
 export function computeWindow(row) {
   if (!row?.last_killed_at_utc) return null;
   const killed = DateTime.fromISO(row.last_killed_at_utc, { zone: 'utc' });
@@ -156,23 +174,28 @@ export function computeWindow(row) {
 export function upsertGuildSettings(guildId, settings) {
   const existing = db.prepare(`SELECT 1 FROM guild_settings WHERE guild_id = ?`).get(guildId);
   if (existing) {
-    db.prepare(`
-      UPDATE guild_settings
-         SET alert_channel_id = COALESCE(@alert_channel_id, alert_channel_id),
-             admin_role_id    = COALESCE(@admin_role_id, admin_role_id),
-             standard_role_id = COALESCE(@standard_role_id, standard_role_id)
-       WHERE guild_id = @guild_id
-    `).run({ guild_id: guildId, ...settings });
+    const keys = [
+      'alert_channel_id','admin_role_id','standard_role_id',
+      'upcoming_hours','ping_role_id','ping_minutes','alert_message_id'
+    ];
+    const sets = keys.map(k => `${k} = COALESCE(@${k}, ${k})`).join(', ');
+    db.prepare(`UPDATE guild_settings SET ${sets} WHERE guild_id = @guild_id`)
+      .run({ guild_id: guildId, ...settings });
   } else {
     db.prepare(`
-      INSERT INTO guild_settings (guild_id, alert_channel_id, admin_role_id, standard_role_id)
-      VALUES (@guild_id, @alert_channel_id, @admin_role_id, @standard_role_id)
+      INSERT INTO guild_settings
+      (guild_id, alert_channel_id, admin_role_id, standard_role_id, upcoming_hours, ping_role_id, ping_minutes, alert_message_id)
+      VALUES (@guild_id, @alert_channel_id, @admin_role_id, @standard_role_id, @upcoming_hours, @ping_role_id, @ping_minutes, @alert_message_id)
     `).run({ guild_id: guildId, ...settings });
   }
 }
 
 export function getGuildSettings(guildId) {
   return db.prepare(`SELECT * FROM guild_settings WHERE guild_id = ?`).get(guildId) || null;
+}
+
+export function getAllGuildSettings() {
+  return db.prepare(`SELECT * FROM guild_settings`).all();
 }
 
 export function setCommandRole(guildId, commandName, roleId) {
@@ -242,6 +265,14 @@ export function addSubscription(userId, guildId, bossName) {
   `).run(userId, guildId, bossName);
 }
 
+export function removeSubscription(userId, guildId, bossName) {
+  const info = db.prepare(`
+    DELETE FROM user_subscriptions
+     WHERE user_id = ? AND guild_id = ? AND boss_name = ?
+  `).run(userId, guildId, bossName);
+  return info.changes > 0;
+}
+
 export function listUserSubscriptions(userId, guildId) {
   const rows = db.prepare(`
     SELECT boss_name FROM user_subscriptions
@@ -258,21 +289,21 @@ export function userHasAnySubscriptions(userId, guildId) {
   return !!row;
 }
 
-export function isUserSubscribedTo(userId, guildId, bossName) {
-  const row = db.prepare(`
-    SELECT 1 FROM user_subscriptions
-     WHERE user_id = ? AND guild_id = ? AND boss_name = ?
-  `).get(userId, guildId, bossName);
-  return !!row;
+// --------------------------
+// Channel ping tracking
+// --------------------------
+export function markChannelPinged(guildId, bossName, windowKey) {
+  db.prepare(`
+    INSERT OR REPLACE INTO channel_alerts (guild_id, boss_name, window_key, pinged)
+    VALUES (?, ?, ?, 1)
+  `).run(guildId, bossName, windowKey);
 }
 
-// Remove a subscription for a specific boss
-export function removeSubscription(userId, guildId, bossName) {
-  const info = db.prepare(`
-    DELETE FROM user_subscriptions
-     WHERE user_id = ? AND guild_id = ? AND boss_name = ?
-  `).run(userId, guildId, bossName);
-  return info.changes > 0;
+export function hasChannelBeenPinged(guildId, bossName, windowKey) {
+  const row = db.prepare(`
+    SELECT pinged FROM channel_alerts WHERE guild_id = ? AND boss_name = ? AND window_key = ?
+  `).get(guildId, bossName, windowKey);
+  return !!row?.pinged;
 }
 
 export default db;

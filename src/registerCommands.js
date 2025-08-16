@@ -1,6 +1,6 @@
 // registerCommands.js
 import 'dotenv/config';
-import { REST, Routes, SlashCommandBuilder, ChannelType } from 'discord.js';
+import { REST, Routes, SlashCommandBuilder } from 'discord.js';
 
 const {
   DISCORD_TOKEN,
@@ -105,7 +105,7 @@ commands.push(
     .setDMPermission(false)
 );
 
-/** /upcoming — now dynamic */
+/** /upcoming - dynamic hours */
 commands.push(
   new SlashCommandBuilder()
     .setName('upcoming')
@@ -128,27 +128,11 @@ commands.push(
     .setDMPermission(false)
 );
 
-/** /setup */
+/** /setup - wizard (no args) */
 commands.push(
   new SlashCommandBuilder()
     .setName('setup')
-    .setDescription('Admin: configure alert channel and roles')
-    .addChannelOption(o =>
-      o.setName('alert_channel')
-       .setDescription('Channel for spawn window alerts')
-       .addChannelTypes(ChannelType.GuildText)
-       .setRequired(false)
-    )
-    .addRoleOption(o =>
-      o.setName('admin_role')
-       .setDescription('Role allowed to use admin commands')
-       .setRequired(false)
-    )
-    .addRoleOption(o =>
-      o.setName('standard_role')
-       .setDescription('Role required for standard commands (if set)')
-       .setRequired(false)
-    )
+    .setDescription('Configuration wizard: alert channel, ping role, hours & lead minutes')
     .setDMPermission(false)
 );
 
@@ -156,7 +140,7 @@ commands.push(
 const gateableCommands = [
   'status', 'details', 'drops', 'killed',
   'subscribe', 'unsubscribe', 'subscriptions',
-  'reset', 'upcoming'
+  'upcoming', 'reset', 'setup'
 ];
 
 commands.push(
@@ -178,7 +162,7 @@ commands.push(
     .setDMPermission(false)
 );
 
-/** /setalert (only adjusts minutes) */
+/** /setalert (only adjusts minutes, per user) */
 commands.push(
   new SlashCommandBuilder()
     .setName('setalert')

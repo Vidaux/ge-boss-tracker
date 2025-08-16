@@ -1,0 +1,43 @@
+[
+  {
+    "name": "Griffon",
+    "location": "Vegas Javier",
+    "respawn_min_hours": 24,
+    "respawn_max_hours": 48,
+    "special_conditions": "Find a Griffon Egg and break it to summon the boss",
+    "stats": {
+      "Max HP": 4598090,
+      "A.R.": 62,
+      "ATK": 18922,
+      "D.R.": 62,
+      "DEF": 154,
+      "Fire RES": 30,
+      "Ice RES": 60,
+      "Lightning RES": 60,
+      "Mental RES": 60,
+      "Type": "Wildlife"
+    },
+    "drops": [
+      "Diamond Coupon",
+      "Grand Level Valkyries Crasher",
+      "Bellem Box",
+      "Random Ring",
+      "Random Unique Equip",
+      "Random Normal Equip",
+      "Level 100 Enchantment Chip",
+      "Level 84 Elite Armor",
+      "Level 92 Elite Armor",
+      "Elite Le Blanc",
+      "Elite Schvarlier Armor",
+      "Veteran Scroll",
+      "Expert Scroll",
+      "Random necklace",
+      "+5 Impervium: Normal (Weapon)",
+      "+5 Impervium: Veteran (Weapon)"
+    ],
+    "respawn_notes": [
+      "Spawns 24~48 hours after death",
+      "Server restart does not affect respawn"
+    ]
+  }
+]

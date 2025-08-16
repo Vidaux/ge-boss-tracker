@@ -171,22 +171,57 @@ export function computeWindow(row) {
 // --------------------------
 // Guild settings & command roles
 // --------------------------
-export function upsertGuildSettings(guildId, settings) {
-  const existing = db.prepare(`SELECT 1 FROM guild_settings WHERE guild_id = ?`).get(guildId);
+export function upsertGuildSettings(guildId, patch) {
+  const existing = db.prepare(`SELECT * FROM guild_settings WHERE guild_id = ?`).get(guildId);
+
+  // Normalize/merge values so we always send ALL columns to SQL
+  const merged = {
+    alert_channel_id: patch.alert_channel_id ?? existing?.alert_channel_id ?? null,
+    admin_role_id:    patch.admin_role_id    ?? existing?.admin_role_id    ?? null,
+    standard_role_id: patch.standard_role_id ?? existing?.standard_role_id ?? null,
+    upcoming_hours:   patch.upcoming_hours   ?? existing?.upcoming_hours   ?? 3,
+    ping_role_id:     patch.ping_role_id     ?? existing?.ping_role_id     ?? null,
+    ping_minutes:     patch.ping_minutes     ?? existing?.ping_minutes     ?? 30,
+    alert_message_id: patch.alert_message_id ?? existing?.alert_message_id ?? null,
+  };
+
   if (existing) {
-    const keys = [
-      'alert_channel_id','admin_role_id','standard_role_id',
-      'upcoming_hours','ping_role_id','ping_minutes','alert_message_id'
-    ];
-    const sets = keys.map(k => `${k} = COALESCE(@${k}, ${k})`).join(', ');
-    db.prepare(`UPDATE guild_settings SET ${sets} WHERE guild_id = @guild_id`)
-      .run({ guild_id: guildId, ...settings });
+    db.prepare(`
+      UPDATE guild_settings
+         SET alert_channel_id = ?,
+             admin_role_id    = ?,
+             standard_role_id = ?,
+             upcoming_hours   = ?,
+             ping_role_id     = ?,
+             ping_minutes     = ?,
+             alert_message_id = ?
+       WHERE guild_id = ?
+    `).run(
+      merged.alert_channel_id,
+      merged.admin_role_id,
+      merged.standard_role_id,
+      merged.upcoming_hours,
+      merged.ping_role_id,
+      merged.ping_minutes,
+      merged.alert_message_id,
+      guildId
+    );
   } else {
     db.prepare(`
       INSERT INTO guild_settings
-      (guild_id, alert_channel_id, admin_role_id, standard_role_id, upcoming_hours, ping_role_id, ping_minutes, alert_message_id)
-      VALUES (@guild_id, @alert_channel_id, @admin_role_id, @standard_role_id, @upcoming_hours, @ping_role_id, @ping_minutes, @alert_message_id)
-    `).run({ guild_id: guildId, ...settings });
+        (guild_id, alert_channel_id, admin_role_id, standard_role_id,
+         upcoming_hours, ping_role_id, ping_minutes, alert_message_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      guildId,
+      merged.alert_channel_id,
+      merged.admin_role_id,
+      merged.standard_role_id,
+      merged.upcoming_hours,
+      merged.ping_role_id,
+      merged.ping_minutes,
+      merged.alert_message_id
+    );
   }
 }
 

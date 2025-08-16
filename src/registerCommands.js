@@ -1,6 +1,6 @@
 // registerCommands.js
 import 'dotenv/config';
-import { REST, Routes, SlashCommandBuilder } from 'discord.js';
+import { REST, Routes, SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
 
 const {
   DISCORD_TOKEN,
@@ -174,6 +174,21 @@ commands.push(
        .setMaxValue(1440)
        .setRequired(true)
     )
+    .setDMPermission(false)
+);
+
+/** /reset */
+commands.push(
+  new SlashCommandBuilder()
+    .setName('reset')
+    .setDescription('Admin: clear the timer for a boss (sets status to Unknown)')
+    .addStringOption(opt =>
+      opt.setName('boss')
+         .setDescription('Boss name')
+         .setRequired(true)
+         .setAutocomplete(true)
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild) // hide from non-admins
     .setDMPermission(false)
 );
 

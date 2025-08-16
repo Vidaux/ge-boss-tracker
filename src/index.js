@@ -92,55 +92,74 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 // --------- Setup wizard component handlers ----------
 client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isAnySelectMenu() && !interaction.isButton()) return;
+  // Only care about these component types
+  if (
+    !(
+      interaction.isStringSelectMenu() ||
+      interaction.isRoleSelectMenu() ||
+      interaction.isChannelSelectMenu() ||
+      interaction.isButton()
+    )
+  ) return;
 
-  // Only allow admins to use setup components
+  // Admin guard for the wizard
   const gs = getGuildSettings(interaction.guildId) || {};
-  const isAdmin =
-    gs?.admin_role_id
-      ? interaction.member.roles.cache.has(gs.admin_role_id)
-      : interaction.member.permissions.has('ManageGuild');
+  const isAdmin = gs?.admin_role_id
+    ? interaction.member.roles.cache.has(gs.admin_role_id)
+    : interaction.member.permissions.has('ManageGuild');
 
   if (!isAdmin) {
+    // Minimal one-off error; no follow-ups afterwards
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use the setup wizard.' });
   }
 
   try {
+    // ----- Silent saves: no extra messages -----
     if (interaction.customId === 'setup:channel' && interaction.isChannelSelectMenu()) {
       const ch = interaction.channels.first();
       upsertGuildSettings(interaction.guildId, { alert_channel_id: ch?.id ?? null });
-      return interaction.reply({ ephemeral: true, content: `Alert channel set to ${ch ? `<#${ch.id}>` : '-'}.` });
+      return interaction.deferUpdate(); // no new message
     }
 
     if (interaction.customId === 'setup:role' && interaction.isRoleSelectMenu()) {
       const role = interaction.roles.first();
       upsertGuildSettings(interaction.guildId, { ping_role_id: role?.id ?? null });
-      return interaction.reply({ ephemeral: true, content: `Ping role set to ${role ? `<@&${role.id}>` : '-'}.` });
+      return interaction.deferUpdate(); // no new message
     }
 
     if (interaction.customId === 'setup:hours' && interaction.isStringSelectMenu()) {
       const hours = parseInt(interaction.values[0], 10);
       upsertGuildSettings(interaction.guildId, { upcoming_hours: hours });
-      return interaction.reply({ ephemeral: true, content: `Dashboard lookahead set to **${hours}h**.` });
+      return interaction.deferUpdate(); // no new message
     }
 
     if (interaction.customId === 'setup:minutes' && interaction.isStringSelectMenu()) {
       const minutes = parseInt(interaction.values[0], 10);
       upsertGuildSettings(interaction.guildId, { ping_minutes: minutes });
-      return interaction.reply({ ephemeral: true, content: `Ping lead time set to **${minutes} minutes**.` });
+      return interaction.deferUpdate(); // no new message
     }
 
+    // ----- Create/Update dashboard: show one confirmation, then dismiss wizard -----
     if (interaction.customId === 'setup:make_message' && interaction.isButton()) {
       const settings = getGuildSettings(interaction.guildId) || {};
       if (!settings.alert_channel_id) {
-        return interaction.reply({ ephemeral: true, content: 'Select an **Alert Channel** first.' });
-      }
-      const channel = await interaction.guild.channels.fetch(settings.alert_channel_id).catch(() => null);
-      if (!channel) {
-        return interaction.reply({ ephemeral: true, content: 'Configured alert channel is invalid or missing permissions.' });
+        // Replace the wizard with a single inline error (no extra messages)
+        return interaction.update({
+          content: '❗ Select an **Alert Channel** first in the menus above.',
+          embeds: [],
+          components: []
+        });
       }
 
-      // Create or update the dashboard message
+      const channel = await interaction.guild.channels.fetch(settings.alert_channel_id).catch(() => null);
+      if (!channel) {
+        return interaction.update({
+          content: '❗ Configured alert channel is invalid or missing permissions.',
+          embeds: [],
+          components: []
+        });
+      }
+
       const hours = settings.upcoming_hours ?? 3;
       const embed = buildUpcomingEmbed(hours);
 
@@ -157,11 +176,25 @@ client.on(Events.InteractionCreate, async (interaction) => {
         upsertGuildSettings(interaction.guildId, { alert_message_id: messageId });
       }
 
-      return interaction.reply({ ephemeral: true, content: 'Dashboard message is created/updated.' });
+      // Replace the wizard with a single confirmation, no extra new messages
+      await interaction.update({
+        content: '✅ Dashboard message created/updated.',
+        embeds: [],
+        components: []
+      });
+
+      // OPTIONAL: auto-dismiss the confirmation after a short delay.
+      // Comment out this block if you prefer to keep the confirmation visible.
+      setTimeout(() => {
+        interaction.deleteReply().catch(() => {});
+      }, 3000);
+
+      return;
     }
   } catch (err) {
     console.error('Setup component error:', err);
-    if (!interaction.replied) {
+    // Only send an error if nothing was acknowledged
+    if (!interaction.deferred && !interaction.replied) {
       await interaction.reply({ ephemeral: true, content: 'Error processing selection.' }).catch(() => {});
     }
   }

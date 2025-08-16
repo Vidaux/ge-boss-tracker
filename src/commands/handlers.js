@@ -44,14 +44,33 @@ import { bus } from '../bus.js';
 function titleCase(s) {
   return s?.trim().replace(/\s+/g, ' ').replace(/\b\w/g, m => m.toUpperCase()) || '';
 }
-function ensureBossExists(bossName) {
-  const boss = getBossByName(bossName);
+
+// Flexible boss resolver (case/spacing tolerant)
+function ensureBossExists(inputName) {
+  // Try direct fetch first
+  const direct = getBossByName(inputName);
+  if (direct) return { boss: direct };
+
+  // Fuzzy match across all bosses
+  const rows = getAllBossRows();
+  const norm = (x) => String(x || '')
+    .toLowerCase()
+    .replace(/[\s_'’\-]/g, ''); // collapse common separators
+
+  const targetTitle = titleCase(inputName);
+  const target = norm(inputName);
+  let boss =
+    rows.find(b => b.name.toLowerCase() === inputName.toLowerCase()) ||
+    rows.find(b => norm(b.name) === target) ||
+    rows.find(b => b.name.toLowerCase() === targetTitle.toLowerCase());
+
   if (!boss) {
     const list = listBosses().join(', ');
-    return { error: `Unknown boss \`${bossName}\`. Known bosses: ${list}` };
+    return { error: `Unknown boss \`${inputName}\`. Known bosses: ${list}` };
   }
   return { boss };
 }
+
 function isAllowedForStandard(interaction, commandName) {
   const gs = getGuildSettings(interaction.guildId);
   const explicitRole = getCommandRole(interaction.guildId, commandName);
@@ -59,13 +78,18 @@ function isAllowedForStandard(interaction, commandName) {
   if (!roleToCheck) return true;
   return interaction.member.roles.cache.has(roleToCheck);
 }
+
 function isAdminAllowed(interaction) {
   const gs = getGuildSettings(interaction.guildId);
   if (gs?.admin_role_id) return interaction.member.roles.cache.has(gs.admin_role_id);
   return interaction.member.permissions.has(PermissionFlagsBits.ManageGuild);
 }
+
 const NBSP_TILDE = '\u00A0~\u00A0';
+
 function formatRespawnPattern(min, max) {
+  // Untracked (null) → show "None"
+  if (min == null || max == null) return 'None';
   const nMin = Number(min);
   const nMax = Number(max);
   if (!Number.isNaN(nMin) && !Number.isNaN(nMax) && nMin === nMax) {
@@ -73,7 +97,20 @@ function formatRespawnPattern(min, max) {
   }
   return `${min}–${max} hours after death`;
 }
+
+// Untracked (static) bosses have null min/max → only allow /details & /drops
+function isUntrackedBoss(b) {
+  return b?.respawn_min_hours == null || b?.respawn_max_hours == null;
+}
+
+function guardUntrackedForCommand(boss, cmdName) {
+  if (!isUntrackedBoss(boss)) return null;
+  if (cmdName === 'details' || cmdName === 'drops') return null;
+  return `**${boss.name}** has no world respawn timer. Use **/details** or **/drops** for this boss.`;
+}
+
 function renderWindowFields(boss, window) {
+  // For display purposes, prefer reset min/max when the window was triggered by server reset
   const min = Number(
     window.trigger === 'reset' && boss.reset_respawn_min_hours != null
       ? boss.reset_respawn_min_hours
@@ -173,11 +210,15 @@ export async function handleKilled(interaction) {
   if (!isAllowedForStandard(interaction, 'killed')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /killed.' });
   }
-  const bossName = titleCase(interaction.options.getString('boss', true));
+  const bossName = interaction.options.getString('boss', true);
   const timeStr = interaction.options.getString('server_time_hhmm', false);
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
   const boss = check.boss;
+
+  // Untracked bosses cannot use /killed
+  const guardMsg = guardUntrackedForCommand(boss, 'killed');
+  if (guardMsg) return interaction.reply({ ephemeral: true, content: guardMsg });
 
   let deathUtc = nowUtc();
   if (timeStr) {
@@ -259,10 +300,14 @@ export async function handleStatus(interaction) {
   if (!isAllowedForStandard(interaction, 'status')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /status.' });
   }
-  const bossName = titleCase(interaction.options.getString('boss', true));
+  const bossName = interaction.options.getString('boss', true);
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
   const boss = check.boss;
+
+  // Untracked bosses cannot use /status
+  const guardMsg = guardUntrackedForCommand(boss, 'status');
+  if (guardMsg) return interaction.reply({ ephemeral: true, content: guardMsg });
 
   if (!boss.last_killed_at_utc) {
     const embed = new EmbedBuilder()
@@ -296,7 +341,7 @@ export async function handleDetails(interaction) {
   if (!isAllowedForStandard(interaction, 'details')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /details.' });
   }
-  const bossName = titleCase(interaction.options.getString('boss', true));
+  const bossName = interaction.options.getString('boss', true);
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
   const b = check.boss;
@@ -336,7 +381,7 @@ export async function handleDrops(interaction) {
   if (!isAllowedForStandard(interaction, 'drops')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /drops.' });
   }
-  const bossName = titleCase(interaction.options.getString('boss', true));
+  const bossName = interaction.options.getString('boss', true);
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
   const b = check.boss;
@@ -351,9 +396,13 @@ export async function handleReset(interaction) {
   if (!isAdminAllowed(interaction)) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /reset.' });
   }
-  const bossName = titleCase(interaction.options.getString('boss', true));
+  const bossName = interaction.options.getString('boss', true);
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
+
+  // Untracked bosses cannot be reset
+  const guardMsg = guardUntrackedForCommand(check.boss, 'reset');
+  if (guardMsg) return interaction.reply({ ephemeral: true, content: guardMsg });
 
   if (!check.boss.last_killed_at_utc) {
     return interaction.reply({ ephemeral: true, content: 'That boss does not currently have a recorded kill — nothing to reset.' });
@@ -375,12 +424,15 @@ export async function handleSubscribeBoss(interaction) {
   if (!isAllowedForStandard(interaction, 'subscribe')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /subscribe.' });
   }
-  const bossName = titleCase(interaction.options.getString('boss', true));
+  const bossName = interaction.options.getString('boss', true);
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
-  const boss = check.boss;
 
-  addSubscription(interaction.user.id, interaction.guildId, boss.name);
+  // Untracked bosses cannot be subscribed
+  const guardMsg = guardUntrackedForCommand(check.boss, 'subscribe');
+  if (guardMsg) return interaction.reply({ ephemeral: true, content: guardMsg });
+
+  addSubscription(interaction.user.id, interaction.guildId, check.boss.name);
   const reg = getUserRegistration(interaction.user.id, interaction.guildId);
   if (!reg || reg.alert_minutes == null) upsertUserAlertMinutes(interaction.user.id, interaction.guildId, 30);
 
@@ -388,35 +440,46 @@ export async function handleSubscribeBoss(interaction) {
   const desc = current.length ? current.map(b => `• ${b}`).join('\n') : 'None';
   const embed = new EmbedBuilder()
     .setTitle('Subscribed to Boss')
-    .setDescription(`You will receive DM alerts for **${boss.name}**.\n(Default lead time **30 minutes** unless changed via /setalert)`)
+    .setDescription(`You will receive DM alerts for **${check.boss.name}**.\n(Default lead time **30 minutes** unless changed via /setalert)`)
     .addFields({ name: 'Your Subscriptions', value: desc })
     .setColor(0x1ABC9C);
 
   return interaction.reply({ embeds: [embed], ephemeral: true });
 }
+
 export async function handleSubscribeAll(interaction) {
   if (!isAllowedForStandard(interaction, 'subscribe')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /subscribe.' });
   }
-  const bosses = listBosses();
-  for (const name of bosses) addSubscription(interaction.user.id, interaction.guildId, name);
+
+  // Only subscribe to tracked bosses
+  const tracked = getAllBossRows()
+    .filter(b => !isUntrackedBoss(b))
+    .map(b => b.name);
+
+  for (const name of tracked) addSubscription(interaction.user.id, interaction.guildId, name);
   const reg = getUserRegistration(interaction.user.id, interaction.guildId);
   if (!reg || reg.alert_minutes == null) upsertUserAlertMinutes(interaction.user.id, interaction.guildId, 30);
 
   const current = listUserSubscriptions(interaction.user.id, interaction.guildId);
   const desc = current.length ? current.map(b => `• ${b}`).join('\n') : 'None';
   return interaction.reply({
-    embeds: [ new EmbedBuilder().setTitle('Subscribed to All Bosses').setDescription('You will receive DM alerts for **all bosses**.').addFields({ name: 'Your Subscriptions', value: desc }).setColor(0x1ABC9C) ],
+    embeds: [ new EmbedBuilder().setTitle('Subscribed to All Bosses').setDescription('You will receive DM alerts for **all tracked bosses**.').addFields({ name: 'Your Subscriptions', value: desc }).setColor(0x1ABC9C) ],
     ephemeral: true
   });
 }
+
 export async function handleUnsubscribeBoss(interaction) {
   if (!isAllowedForStandard(interaction, 'unsubscribe')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /unsubscribe.' });
   }
-  const bossName = titleCase(interaction.options.getString('boss', true));
+  const bossName = interaction.options.getString('boss', true);
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
+
+  // Block using this command for untracked bosses too
+  const guardMsg = guardUntrackedForCommand(check.boss, 'unsubscribe');
+  if (guardMsg) return interaction.reply({ ephemeral: true, content: guardMsg });
 
   const removed = removeSubscription(interaction.user.id, interaction.guildId, check.boss.name);
   const current = listUserSubscriptions(interaction.user.id, interaction.guildId);
@@ -430,6 +493,7 @@ export async function handleUnsubscribeBoss(interaction) {
 
   return interaction.reply({ embeds: [embed], ephemeral: true });
 }
+
 export async function handleUnsubscribeAll(interaction) {
   if (!isAllowedForStandard(interaction, 'unsubscribe')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /unsubscribe.' });
@@ -442,6 +506,7 @@ export async function handleUnsubscribeAll(interaction) {
     ephemeral: true
   });
 }
+
 export async function handleSubscriptions(interaction) {
   if (!isAllowedForStandard(interaction, 'subscriptions')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /subscriptions.' });

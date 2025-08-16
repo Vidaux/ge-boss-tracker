@@ -847,5 +847,105 @@
       "Spawns 28 hours after death",
       "Server restart does not affect respawn"
     ]
+  },
+  {
+    "name": "Gate of Flame",
+    "location": "Topolo Durga",
+    "special_conditions": "Use Fire Orb to open the gate in Topolo Durga. Fire Orbs are one of Federigo's quest rewards. Use Fire Orbs to remove the ten seals of Lava Leaf.",
+    "stats": {
+      "Max HP": 7991781,
+      "A.R.": 56,
+      "ATK": 43446,
+      "D.R.": 56,
+      "DEF": 198,
+      "Fire RES": 90,
+      "Ice RES": -100,
+      "Lightning RES": 50,
+      "Mental RES": 80,
+      "Type": "Lifeless"
+    },
+    "drops": [
+      "Fire weapon",
+      "Random Ring",
+      "Random Unique Equip",
+      "Random Normal Equip",
+      "Level 84 Elite Armor",
+      "Level 100 weapon",
+      "Level 100 elite weapon recipe",
+      "Veteran scroll",
+      "Expert scroll",
+      "Le Blanc Armor",
+      "Schvarlier Armor",
+      "Bellem Box",
+      "Level 100 Enchantment Chip",
+      "Grand Level Valkyries Crasher",
+      "+5 Impervium: Normal (Weapon)",
+      "+5 Impervium: Veteran (Weapon)"
+    ],
+    "respawn_notes": [
+      "No respawn timer (instance/gate content)"
+    ]
+  },
+  {
+    "name": "Hell Valley",
+    "location": "El Canon de Diabolica",
+    "special_conditions": "Hell Valley Key x1 required. Obtain from hunting in El Canon de Diabolica and El Ruina de Memoria.",
+    "stats": {
+      "Max HP": 34290430,
+      "A.R.": 52,
+      "ATK": 11330,
+      "D.R.": 52,
+      "DEF": 96,
+      "Fire RES": 30,
+      "Ice RES": 30,
+      "Lightning RES": 30,
+      "Mental RES": 30,
+      "Type": "Demon"
+    },
+    "drops": [
+      "Random Ring",
+      "Random Unique Equip",
+      "Random Normal Equip",
+      "Grand Level Valkiryes Crasher",
+      "Box of bellem",
+      "Level 84 Elite Equips",
+      "Veteran scroll",
+      "Level 100 Enchantment Chip",
+      "Level 92 elite armor recipes"
+    ],
+    "respawn_notes": [
+      "Can be completed once per day per account (no world respawn timer)"
+    ]
+  },
+  {
+    "name": "Jormongand",
+    "location": "Vegas Javier",
+    "special_conditions": "Symbol of Jormongand x1 required (recipe from Precious Metals Merchant in City of Auch). Each participant must have ≥ 500 family reputation.",
+    "stats": {
+      "Max HP": 6368640,
+      "A.R.": 59,
+      "ATK": 6078,
+      "D.R.": 59,
+      "DEF": 241,
+      "Fire RES": 70,
+      "Ice RES": 70,
+      "Lightning RES": 70,
+      "Mental RES": 70,
+      "Type": "Wildlife"
+    },
+    "drops": [
+      "Enchant Chips Lv. 92",
+      "Enchant Chips Lv. 96",
+      "Enchant Chips Lv. 100",
+      "Jormongand Skin",
+      "Level 100 equipment",
+      "Level 92 elite armor recipes",
+      "Le Noir armor recipes",
+      "Mysterious Key",
+      "Recipe - Jormongand Belt"
+    ],
+    "respawn_notes": [
+      "Can be completed once per day per account (no world respawn timer)"
+    ]
   }
 ]

@@ -188,22 +188,16 @@ export function getAllBossRows() {
 
 export function computeWindow(row) {
   if (!row?.last_killed_at_utc) return null;
-  const base = DateTime.fromISO(row.last_killed_at_utc, { zone: 'utc' });
 
-  const isReset = (row.last_trigger_kind === 'reset');
-  const minH = isReset && row.reset_respawn_min_hours != null
-    ? row.reset_respawn_min_hours
-    : row.respawn_min_hours;
+  // NEW: do not compute for untracked/static bosses
+  if (row.respawn_min_hours == null || row.respawn_max_hours == null) {
+    return null;
+  }
 
-  const maxH = isReset && row.reset_respawn_max_hours != null
-    ? row.reset_respawn_max_hours
-    : row.respawn_max_hours;
-
-  if (minH == null || maxH == null) return null;
-
-  const start = base.plus({ hours: minH });
-  const end   = base.plus({ hours: maxH });
-  return { start, end, killed: base, trigger: isReset ? 'reset' : 'death' };
+  const killed = DateTime.fromISO(row.last_killed_at_utc, { zone: 'utc' });
+  const start = killed.plus({ hours: row.respawn_min_hours });
+  const end   = killed.plus({ hours: row.respawn_max_hours });
+  return { start, end, killed };
 }
 
 // Apply server reset to all bosses that have reset timers

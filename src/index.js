@@ -24,7 +24,7 @@ import {
   handleSetup,
   handleSetCommandRole,
   handleSetAlert,
-  handleServerReset,       // NEW
+  handleServerReset,
   buildUpcomingEmbed
 } from './commands/handlers.js';
 
@@ -41,7 +41,7 @@ import {
   listRegisteredUsers,
   hasUserBeenAlerted,
   markUserAlerted,
-  listKilledBosses           // NEW (for autocomplete)
+  listKilledBosses
 } from './db.js';
 
 import { nowUtc, fmtUtc, toUnixSeconds } from './utils/time.js';
@@ -75,17 +75,25 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const focused = interaction.options.getFocused(true);
       if (focused?.name === 'boss') {
         const query = String(focused.value || '').toLowerCase();
-        let sourceNames;
+        const rows = getAllBossRows();
+        const isUntracked = (b) => b.respawn_min_hours == null || b.respawn_max_hours == null;
+
+        let sourceNames = [];
 
         if (interaction.commandName === 'unsubscribe') {
           const sub = interaction.options.getSubcommand(false);
           sourceNames = (!sub || sub === 'boss')
             ? listUserSubscriptions(interaction.user.id, interaction.guildId)
-            : listBosses();
+            : [];
         } else if (interaction.commandName === 'reset') {
-          sourceNames = listKilledBosses(); // only bosses with a recorded kill
+          // Only bosses with a recorded kill
+          sourceNames = listKilledBosses();
+        } else if (interaction.commandName === 'details' || interaction.commandName === 'drops') {
+          // All bosses (tracked + untracked)
+          sourceNames = rows.map(b => b.name);
         } else {
-          sourceNames = listBosses();
+          // Other commands → tracked-only
+          sourceNames = rows.filter(b => !isUntracked(b)).map(b => b.name);
         }
 
         const names = sourceNames
@@ -229,7 +237,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       case 'details':         await handleDetails(interaction); break;
       case 'drops':           await handleDrops(interaction); break;
       case 'reset':           await handleReset(interaction); break;
-      case 'serverreset':     await handleServerReset(interaction); break; // NEW
+      case 'serverreset':     await handleServerReset(interaction); break;
       case 'setup':           await handleSetup(interaction); break;
       case 'setcommandrole':  await handleSetCommandRole(interaction); break;
       case 'setalert':        await handleSetAlert(interaction); break;
@@ -246,7 +254,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-// --------- Scheduler: update dashboard + ping role ----------
+// --------- Scheduler: update dashboard + ping role + DMs ----------
 async function tickOnce(onlyGuildId = null) {
   const guilds = onlyGuildId
     ? [getGuildSettings(onlyGuildId)].filter(Boolean)

@@ -129,10 +129,7 @@ export async function handleSubscribe(interaction) {
   const embed = new EmbedBuilder()
     .setTitle('Subscribed to Boss')
     .setDescription(`You will receive alerts for **${boss.name}** when you have a /setalert configured.`)
-    .addFields(
-      { name: 'Your Subscriptions', value: desc },
-      dropsField(boss)
-    )
+    .addFields({ name: 'Your Subscriptions', value: desc })
     .setColor(0x1ABC9C);
 
   return interaction.reply({ embeds: [embed], ephemeral: true });
@@ -182,7 +179,6 @@ export async function handleKilled(interaction) {
   if (Array.isArray(updated.parts) && updated.parts.length) {
     fields.push({ name: 'Boss Parts', value: updated.parts.map(p => `• ${p.name}`).join('\n') });
   }
-  fields.push(dropsField(updated));
 
   const embed = new EmbedBuilder()
     .setTitle(`Recorded Kill: ${updated.name}`)
@@ -306,20 +302,21 @@ export async function handleDetails(interaction) {
 
   if (Array.isArray(b.parts) && b.parts.length) {
     for (const part of b.parts) {
-      const statsLines = Object.entries(part.stats || {}).map(([k, v]) => `**${k}**: ${v}`).join('\n') || '-';
+      const statsLines = Object.entries(part.stats || {})
+        .map(([k, v]) => `**${k}**: ${v}`)
+        .join('\n') || '-';
       fields.push({ name: `Stats — ${part.name}`, value: statsLines });
     }
   } else {
-    const statsLines = Object.entries(b.stats || {}).map(([k, v]) => `**${k}**: ${v}`).join('\n') || '-';
+    const statsLines = Object.entries(b.stats || {})
+      .map(([k, v]) => `**${k}**: ${v}`)
+      .join('\n') || '-';
     fields.push({ name: 'Stats', value: statsLines });
   }
 
   if ((b.respawn_notes || []).length) {
     fields.push({ name: 'Notes', value: (b.respawn_notes || []).map(n => `• ${n}`).join('\n') });
   }
-
-  // Add Drops (new request)
-  fields.push(dropsField(b));
 
   return interaction.reply({
     embeds: [
@@ -365,15 +362,12 @@ export async function handleReset(interaction) {
   const ok = resetBoss(boss.name);
   if (!ok) return interaction.reply({ ephemeral: true, content: 'Failed to reset boss.' });
 
-  return interaction.reply({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle(`Reset: ${boss.name}`)
-        .setDescription('Respawn timer cleared. Status is now **Unknown**.')
-        .addFields(dropsField(boss))
-        .setColor(0xE17055)
-    ]
-  });
+  const embed = new EmbedBuilder()
+    .setTitle(`Reset: ${boss.name}`)
+    .setDescription('Respawn timer cleared. Status is now **Unknown**.')
+    .setColor(0xE17055);
+
+  return interaction.reply({ embeds: [embed] });
 }
 
 // /setup

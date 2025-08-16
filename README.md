@@ -29,3 +29,12 @@ Tracks boss respawn windows for Granado Espada. Uses **UTC internally** and Disc
 ## Notes
 - Server time is **UTC**.
 - All visible “Your Time” values use Discord’s timestamp feature — clients render them in the viewer’s local time.
+
+## New Commands
+- `/listbosses` — lists all known bosses.
+- `/subscribe <boss>` — subscribe to alerts for a specific boss.
+    - If a user has **any** subscriptions, they’ll only receive DMs for those bosses.
+    - If a user has **no** subscriptions, they’ll receive DMs for **all** bosses (when `/setalert` is set).
+
+## Relative Time
+Embeds now include Discord relative timestamps like `<t:…:R>` (e.g., “in 27 minutes”) alongside exact server UTC and your local time.

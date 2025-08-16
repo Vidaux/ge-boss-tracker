@@ -1,11 +1,17 @@
 import {
   getBossByName, listBosses, setKilled, resetBoss, computeWindow,
   getGuildSettings, upsertGuildSettings, setCommandRole, getCommandRole,
-  upsertUserAlertMinutes, getUserRegistration
+  upsertUserAlertMinutes
 } from '../db.js';
+
+import {
+  addSubscription, listUserSubscriptions
+} from '../db.js';
+
 import {
   nowUtc, parseServerHHmmToUtcToday, fmtUtc, toUnixSeconds
 } from '../utils/time.js';
+
 import { EmbedBuilder, PermissionFlagsBits } from 'discord.js';
 
 function titleCase(s){ return s?.trim().replace(/\s+/g, ' ').replace(/\b\w/g, m=>m.toUpperCase()) || ''; }
@@ -34,8 +40,40 @@ function isAdminAllowed(interaction) {
   if (gs?.admin_role_id) {
     return interaction.member.roles.cache.has(gs.admin_role_id);
   }
-  // fallback: manage guild permission
   return interaction.member.permissions.has(PermissionFlagsBits.ManageGuild);
+}
+
+// ---------- New: /listbosses ----------
+export async function handleListBosses(interaction) {
+  const names = listBosses();
+  const embed = new EmbedBuilder()
+    .setTitle('Boss List')
+    .setDescription(names.length ? names.map(n => `• ${n}`).join('\n') : 'No bosses configured.')
+    .setColor(0x95A5A6);
+  return interaction.reply({ embeds: [embed], ephemeral: true });
+}
+
+// ---------- New: /subscribe <boss> ----------
+export async function handleSubscribe(interaction) {
+  if (!isAllowedForStandard(interaction, 'subscribe')) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /subscribe.' });
+  }
+  const bossName = titleCase(interaction.options.getString('boss', true));
+  const check = ensureBossExists(bossName);
+  if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
+
+  addSubscription(interaction.user.id, interaction.guildId, check.boss.name);
+
+  const current = listUserSubscriptions(interaction.user.id, interaction.guildId);
+  const desc = current.length ? current.map(b => `• ${b}`).join('\n') : 'None';
+
+  const embed = new EmbedBuilder()
+    .setTitle('Subscribed to Boss')
+    .setDescription(`You will receive alerts for **${check.boss.name}** when you have a /setalert configured.`)
+    .addFields({ name: 'Your Subscriptions', value: desc })
+    .setColor(0x1ABC9C);
+
+  return interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
 export async function handleKilled(interaction) {
@@ -55,7 +93,6 @@ export async function handleKilled(interaction) {
     if (!parsed) {
       return interaction.reply({ ephemeral: true, content: 'Invalid time format. Use HH:MM in UTC, e.g. 21:22' });
     }
-    // If that "today" time is in the future (server UTC), assume they meant yesterday.
     if (parsed > nowUtc()) deathUtc = parsed.minus({ days: 1 });
     else deathUtc = parsed;
   }
@@ -72,7 +109,8 @@ export async function handleKilled(interaction) {
         .setDescription(`Respawn window will be recalculated.`)
         .addFields(
           { name: 'Server Time (UTC)', value: fmtUtc(deathUtc), inline: true },
-          { name: 'Your Time', value: `<t:${deathUnix}:F>`, inline: true }
+          { name: 'Your Time', value: `<t:${deathUnix}:F>`, inline: true },
+          { name: 'Relative', value: `<t:${deathUnix}:R>` }
         )
         .setColor(0x00B894)
     ]
@@ -113,10 +151,13 @@ export async function handleStatus(interaction) {
         .addFields(
           { name: 'Last Death — Server', value: fmtUtc(window.killed), inline: true },
           { name: 'Last Death — Your',   value: `<t:${killedUnix}:F>`, inline: true },
+          { name: 'Last Death — Relative', value: `<t:${killedUnix}:R>` },
           { name: 'Window Start — Server', value: fmtUtc(window.start), inline: true },
           { name: 'Window Start — Your',   value: `<t:${startUnix}:F>`, inline: true },
+          { name: 'Window Start — Relative', value: `<t:${startUnix}:R>` },
           { name: 'Window End — Server', value: fmtUtc(window.end), inline: true },
-          { name: 'Window End — Your',   value: `<t:${endUnix}:F>`, inline: true }
+          { name: 'Window End — Your',   value: `<t:${endUnix}:F>`, inline: true },
+          { name: 'Window End — Relative', value: `<t:${endUnix}:R>` }
         )
         .setFooter({ text: 'Server time is UTC. Local times are rendered by Discord.' })
         .setColor(0x0984E3)
@@ -233,12 +274,12 @@ export async function handleSetCommandRole(interaction) {
   return interaction.reply({ ephemeral: true, content: `Set role for /${commandName} to ${role}.` });
 }
 
-// === New flow: /setalert also enrolls the user (no /register needed)
+// /setalert minutes => enroll for DMs and set lead time
 export async function handleSetAlert(interaction) {
   const minutes = interaction.options.getInteger('minutes', true);
   if (minutes < 1 || minutes > 1440) {
     return interaction.reply({ ephemeral: true, content: 'Minutes must be between 1 and 1440.' });
   }
   upsertUserAlertMinutes(interaction.user.id, interaction.guildId, minutes);
-  return interaction.reply({ ephemeral: true, content: `You will be DM’d ~${minutes} minutes before a spawn window starts.` });
+  return interaction.reply({ ephemeral: true, content: `You will be DM’d ~${minutes} minutes before a subscribed (or all) boss window starts.` });
 }

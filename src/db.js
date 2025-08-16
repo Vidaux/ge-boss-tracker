@@ -1,13 +1,12 @@
 import Database from 'better-sqlite3';
 import { DateTime } from 'luxon';
-import fs from 'node:fs';
 import path from 'node:path';
 import bossesSeed from './data/bosses.json' assert { type: 'json' };
 
 const DB_PATH = path.join(process.cwd(), 'ge-boss-bot.sqlite');
 const db = new Database(DB_PATH);
 
-// Create tables (timezone column kept optional for backward compatibility; it’s no longer used)
+// Create tables
 db.exec(`
 CREATE TABLE IF NOT EXISTS bosses (
   name TEXT PRIMARY KEY,
@@ -39,7 +38,7 @@ CREATE TABLE IF NOT EXISTS command_roles (
 CREATE TABLE IF NOT EXISTS user_registrations (
   user_id TEXT,
   guild_id TEXT,
-  timezone TEXT,         -- unused now; kept for compatibility
+  timezone TEXT,         -- unused; kept for compatibility
   alert_minutes INTEGER, -- per-user alert lead time
   PRIMARY KEY (user_id, guild_id)
 );
@@ -52,9 +51,17 @@ CREATE TABLE IF NOT EXISTS user_alerts (
   alerted INTEGER,
   PRIMARY KEY (user_id, guild_id, boss_name, window_key)
 );
+
+-- NEW: per-boss subscriptions
+CREATE TABLE IF NOT EXISTS user_subscriptions (
+  user_id TEXT,
+  guild_id TEXT,
+  boss_name TEXT,
+  PRIMARY KEY (user_id, guild_id, boss_name)
+);
 `);
 
-// Seed bosses if missing
+// Seed bosses
 const insertBoss = db.prepare(`
   INSERT OR IGNORE INTO bosses
   (name, location, respawn_min_hours, respawn_max_hours, special_conditions,
@@ -77,22 +84,20 @@ for (const b of bossesSeed) {
 
 export function setKilled(bossName, utcIsoString) {
   const windowKey = `${bossName}:${utcIsoString}`;
-  const stmt = db.prepare(`
+  const info = db.prepare(`
     UPDATE bosses
        SET last_killed_at_utc = ?, window_notif_key = ?
      WHERE name = ?
-  `);
-  const info = stmt.run(utcIsoString, windowKey, bossName);
+  `).run(utcIsoString, windowKey, bossName);
   return info.changes > 0;
 }
 
 export function resetBoss(bossName) {
-  const stmt = db.prepare(`
+  const info = db.prepare(`
     UPDATE bosses
        SET last_killed_at_utc = NULL, window_notif_key = NULL
      WHERE name = ?
-  `);
-  const info = stmt.run(bossName);
+  `).run(bossName);
   return info.changes > 0;
 }
 
@@ -113,22 +118,20 @@ export function listBosses() {
 }
 
 export function upsertGuildSettings(guildId, settings) {
-  const existing = db.prepare(`SELECT * FROM guild_settings WHERE guild_id = ?`).get(guildId);
+  const existing = db.prepare(`SELECT 1 FROM guild_settings WHERE guild_id = ?`).get(guildId);
   if (existing) {
-    const stmt = db.prepare(`
+    db.prepare(`
       UPDATE guild_settings
          SET alert_channel_id = COALESCE(@alert_channel_id, alert_channel_id),
              admin_role_id    = COALESCE(@admin_role_id, admin_role_id),
              standard_role_id = COALESCE(@standard_role_id, standard_role_id)
        WHERE guild_id = @guild_id
-    `);
-    stmt.run({ guild_id: guildId, ...settings });
+    `).run({ guild_id: guildId, ...settings });
   } else {
-    const stmt = db.prepare(`
+    db.prepare(`
       INSERT INTO guild_settings (guild_id, alert_channel_id, admin_role_id, standard_role_id)
       VALUES (@guild_id, @alert_channel_id, @admin_role_id, @standard_role_id)
-    `);
-    stmt.run({ guild_id: guildId, ...settings });
+    `).run({ guild_id: guildId, ...settings });
   }
 }
 
@@ -137,12 +140,11 @@ export function getGuildSettings(guildId) {
 }
 
 export function setCommandRole(guildId, commandName, roleId) {
-  const stmt = db.prepare(`
+  db.prepare(`
     INSERT INTO command_roles (guild_id, command_name, role_id)
     VALUES (?, ?, ?)
     ON CONFLICT(guild_id, command_name) DO UPDATE SET role_id = excluded.role_id
-  `);
-  stmt.run(guildId, commandName, roleId);
+  `).run(guildId, commandName, roleId);
 }
 
 export function getCommandRole(guildId, commandName) {
@@ -152,11 +154,10 @@ export function getCommandRole(guildId, commandName) {
   return row?.role_id || null;
 }
 
-// === User alert storage (register-less) ===
-// Upsert the user's alert minutes; this also “enrolls” them for DMs.
+// Alerts (register-less)
 export function upsertUserAlertMinutes(userId, guildId, minutes) {
   const existing = db.prepare(`
-    SELECT user_id FROM user_registrations WHERE user_id = ? AND guild_id = ?
+    SELECT 1 FROM user_registrations WHERE user_id = ? AND guild_id = ?
   `).get(userId, guildId);
   if (existing) {
     db.prepare(`
@@ -177,11 +178,10 @@ export function getUserRegistration(userId, guildId) {
 }
 
 export function markUserAlerted(userId, guildId, bossName, windowKey) {
-  const stmt = db.prepare(`
+  db.prepare(`
     INSERT OR REPLACE INTO user_alerts (user_id, guild_id, boss_name, window_key, alerted)
     VALUES (?, ?, ?, ?, 1)
-  `);
-  stmt.run(userId, guildId, bossName, windowKey);
+  `).run(userId, guildId, bossName, windowKey);
 }
 
 export function hasUserBeenAlerted(userId, guildId, bossName, windowKey) {
@@ -195,13 +195,41 @@ export function getAllBossRows() {
   return db.prepare(`SELECT * FROM bosses`).all();
 }
 
-// Utility to compute a window for a boss
 export function computeWindow(row) {
   if (!row?.last_killed_at_utc) return null;
   const killed = DateTime.fromISO(row.last_killed_at_utc, { zone: 'utc' });
   const start = killed.plus({ hours: row.respawn_min_hours });
   const end = killed.plus({ hours: row.respawn_max_hours });
   return { start, end, killed };
+}
+
+// === Subscriptions ===
+export function addSubscription(userId, guildId, bossName) {
+  db.prepare(`
+    INSERT OR IGNORE INTO user_subscriptions (user_id, guild_id, boss_name)
+    VALUES (?, ?, ?)
+  `).run(userId, guildId, bossName);
+}
+
+export function listUserSubscriptions(userId, guildId) {
+  const rows = db.prepare(`
+    SELECT boss_name FROM user_subscriptions WHERE user_id = ? AND guild_id = ? ORDER BY boss_name
+  `).all(userId, guildId);
+  return rows.map(r => r.boss_name);
+}
+
+export function userHasAnySubscriptions(userId, guildId) {
+  const row = db.prepare(`
+    SELECT 1 FROM user_subscriptions WHERE user_id = ? AND guild_id = ? LIMIT 1
+  `).get(userId, guildId);
+  return !!row;
+}
+
+export function isUserSubscribedTo(userId, guildId, bossName) {
+  const row = db.prepare(`
+    SELECT 1 FROM user_subscriptions WHERE user_id = ? AND guild_id = ? AND boss_name = ?
+  `).get(userId, guildId, bossName);
+  return !!row;
 }
 
 export default db;

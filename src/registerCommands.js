@@ -2,7 +2,6 @@ import 'dotenv/config';
 import { REST, Routes, SlashCommandBuilder } from 'discord.js';
 
 const commands = [
-  // /killed boss [server_time_hhmm]
   new SlashCommandBuilder()
     .setName('killed')
     .setDescription('Record a boss kill (server time in UTC; optional HH:MM)')
@@ -11,35 +10,30 @@ const commands = [
     .addStringOption(o =>
       o.setName('server_time_hhmm').setDescription('UTC HH:MM (optional)').setRequired(false)),
 
-  // /status boss
   new SlashCommandBuilder()
     .setName('status')
     .setDescription('Show respawn window for a boss')
     .addStringOption(o =>
       o.setName('boss').setDescription('Boss name').setRequired(true)),
 
-  // /details boss
   new SlashCommandBuilder()
     .setName('details')
     .setDescription('Boss location & stats')
     .addStringOption(o =>
       o.setName('boss').setDescription('Boss name').setRequired(true)),
 
-  // /drops boss
   new SlashCommandBuilder()
     .setName('drops')
     .setDescription('Boss drop list')
     .addStringOption(o =>
       o.setName('boss').setDescription('Boss name').setRequired(true)),
 
-  // /reset boss (admin only via role)
   new SlashCommandBuilder()
     .setName('reset')
     .setDescription('Reset boss timer to Unknown (admin)')
     .addStringOption(o =>
       o.setName('boss').setDescription('Boss name').setRequired(true)),
 
-  // /setup alert_channel admin_role standard_role
   new SlashCommandBuilder()
     .setName('setup')
     .setDescription('Configure alerts channel and roles (admin)')
@@ -50,27 +44,38 @@ const commands = [
     .addRoleOption(o =>
       o.setName('standard_role').setDescription('Role required for standard commands').setRequired(false)),
 
-  // /setcommandrole command role (admin)
   new SlashCommandBuilder()
     .setName('setcommandrole')
     .setDescription('Gate a specific command behind a role (admin)')
     .addStringOption(o =>
-      o.setName('command').setDescription('Command name (killed/status/details/drops)').setRequired(true)
+      o.setName('command').setDescription('Command name (killed/status/details/drops/subscribe)').setRequired(true)
         .addChoices(
           { name: 'killed', value: 'killed' },
           { name: 'status', value: 'status' },
           { name: 'details', value: 'details' },
-          { name: 'drops', value: 'drops' }
+          { name: 'drops', value: 'drops' },
+          { name: 'subscribe', value: 'subscribe' }
         ))
     .addRoleOption(o =>
       o.setName('role').setDescription('Role required to use the command').setRequired(true)),
 
-  // /setalert minutes
   new SlashCommandBuilder()
     .setName('setalert')
     .setDescription('Set how many minutes before window you want a DM alert')
     .addIntegerOption(o =>
-      o.setName('minutes').setDescription('Minutes (1-1440)').setRequired(true))
+      o.setName('minutes').setDescription('Minutes (1-1440)').setRequired(true)),
+
+  // NEW: listbosses
+  new SlashCommandBuilder()
+    .setName('listbosses')
+    .setDescription('List all known bosses'),
+
+  // NEW: subscribe
+  new SlashCommandBuilder()
+    .setName('subscribe')
+    .setDescription('Subscribe to alerts for a specific boss')
+    .addStringOption(o =>
+      o.setName('boss').setDescription('Boss name').setRequired(true))
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);

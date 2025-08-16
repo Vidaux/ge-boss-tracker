@@ -5,19 +5,21 @@ import {
 } from 'discord.js';
 import {
   getAllBossRows, computeWindow, getGuildSettings,
-  getUserRegistration, hasUserBeenAlerted, markUserAlerted
+  getUserRegistration, hasUserBeenAlerted, markUserAlerted,
+  userHasAnySubscriptions, isUserSubscribedTo
 } from './db.js';
 import { DateTime } from 'luxon';
 import { toUnixSeconds, fmtUtc } from './utils/time.js';
 import {
   handleKilled, handleStatus, handleDetails, handleDrops,
   handleReset, handleSetup, handleSetCommandRole,
-  handleSetAlert
+  handleSetAlert, handleListBosses, handleSubscribe
 } from './commands/handlers.js';
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.DirectMessages
   ],
   partials: [Partials.Channel]
@@ -39,6 +41,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       case 'setup':  return handleSetup(interaction);
       case 'setcommandrole': return handleSetCommandRole(interaction);
       case 'setalert': return handleSetAlert(interaction);
+      case 'listbosses': return handleListBosses(interaction);
+      case 'subscribe': return handleSubscribe(interaction);
       default:
         return interaction.reply({ ephemeral: true, content: 'Unknown command.' });
     }
@@ -52,7 +56,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 // === Alert loop ===
-// Every minute, notify registered users ~X minutes before window start (UTC-based).
+// - Uses UTC internally.
+// - Sends DM ~X minutes before window start, per-user.
+// - If a user has any subscriptions, only alert for subscribed bosses; otherwise alert for all bosses.
 setInterval(async () => {
   try {
     const bosses = getAllBossRows();
@@ -66,17 +72,23 @@ setInterval(async () => {
 
       const windowKey = b.window_notif_key;
 
-      // DM registered users in each guild
       for (const [guildId, guild] of client.guilds.cache) {
         const members = await guild.members.fetch();
+
         for (const [, member] of members) {
           if (member.user.bot) continue;
+
           const reg = getUserRegistration(member.id, guildId);
-          if (!reg?.alert_minutes) continue;
+          const minutesBefore = reg?.alert_minutes;
+          if (!minutesBefore) continue;
 
-          const minutesBefore = reg.alert_minutes;
+          // Subscription filter
+          const hasAny = userHasAnySubscriptions(member.id, guildId);
+          if (hasAny && !isUserSubscribedTo(member.id, guildId, b.name)) {
+            continue; // user has subs, but not this boss
+          }
+
           const alertTime = window.start.minus({ minutes: minutesBefore });
-
           if (now >= alertTime && now <= window.end) {
             const already = hasUserBeenAlerted(member.id, guildId, b.name, windowKey);
             if (already) continue;
@@ -90,8 +102,10 @@ setInterval(async () => {
               .addFields(
                 { name: 'Window Start — Server', value: fmtUtc(window.start), inline: true },
                 { name: 'Window Start — Your',   value: `<t:${startUnix}:F>`, inline: true },
+                { name: 'Relative to Start', value: `<t:${startUnix}:R>` },
                 { name: 'Window End — Server', value: fmtUtc(window.end), inline: true },
-                { name: 'Window End — Your',   value: `<t:${endUnix}:F>`, inline: true }
+                { name: 'Window End — Your',   value: `<t:${endUnix}:F>`, inline: true },
+                { name: 'Relative to End', value: `<t:${endUnix}:R>` }
               )
               .setColor(0xFDCB6E);
 
@@ -118,7 +132,8 @@ setInterval(async () => {
             .setTitle(`Spawn Window Started: ${b.name}`)
             .setDescription(
               `**Server (UTC):** ${fmtUtc(window.start)} → ${fmtUtc(window.end)}\n` +
-              `**Local:** <t:${startUnix}:F> → <t:${endUnix}:F>`
+              `**Local:** <t:${startUnix}:F> → <t:${endUnix}:F>\n` +
+              `**Relative:** <t:${startUnix}:R> → <t:${endUnix}:R>`
             )
             .setColor(0xE1B12C);
           try { await ch.send({ embeds: [embed] }); } catch {}

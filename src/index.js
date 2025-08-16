@@ -24,8 +24,7 @@ import {
   handleSetup,
   handleSetCommandRole,
   handleSetAlert,
-  handleServerReset,
-  buildUpcomingEmbed
+  handleServerReset
 } from './commands/handlers.js';
 
 import {
@@ -33,13 +32,14 @@ import {
   getGuildSettings,
   upsertGuildSettings,
   getAllGuildSettings,
-  getAllBossRows,
+  getAllBossRows,              // static metadata (used for autocomplete filtering)
+  getAllBossRowsForGuild,      // NEW: guild-scoped state + metadata
   computeWindow,
   hasChannelBeenPinged,
   listRegisteredUsers,
   hasUserBeenAlerted,
   markUserAlerted,
-  listKilledBosses,
+  listKilledBosses,            // now guild-scoped
   recordChannelPingMessage,
   listChannelMessagesDueForDeletion,
   markChannelAlertDeleted
@@ -64,6 +64,61 @@ const client = new Client({
   partials: [Partials.Channel]
 });
 
+// Small helper for pretty window ranges
+const NBSP_TILDE = '\u00A0~\u00A0';
+
+// Build an upcoming embed **for a specific guild**, using that guild's boss state
+function buildUpcomingEmbedForGuild(hours, guildId) {
+  const rows = getAllBossRowsForGuild(guildId);
+  const now = nowUtc();
+  const horizon = now.plus({ hours });
+
+  const within = [];
+  for (const b of rows) {
+    if (!b.last_killed_at_utc) continue;
+    const w = computeWindow(b);
+    if (!w) continue;
+    if (w.end <= now) continue;      // already closed window
+    if (w.start > horizon) continue; // starts beyond horizon
+    within.push({ boss: b, window: w });
+  }
+
+  within.sort((a, b) => {
+    const aKey = (a.window.start < now ? now : a.window.start).toMillis();
+    const bKey = (b.window.start < now ? now : b.window.start).toMillis();
+    return aKey - bKey;
+  });
+
+  const fields = within.length
+    ? within.map(({ boss, window }) => {
+        const startUnix = toUnixSeconds(window.start);
+        const endUnix = toUnixSeconds(window.end);
+        const isSingle = window.start.toMillis() === window.end.toMillis();
+
+        const value = isSingle
+          ? [
+              `**Your Time:** <t:${startUnix}:f>`,
+              `**Server Time (UTC):** ${fmtUtc(window.start)}`
+            ].join('\n')
+          : [
+              `**Your Time:** <t:${startUnix}:f>${NBSP_TILDE}<t:${endUnix}:f>`,
+              `**Server Time (UTC):** ${fmtUtc(window.start)} ~ ${fmtUtc(window.end)}`
+            ].join('\n');
+
+        const label = window.trigger === 'reset'
+          ? `${boss.name} *(after server reset)*`
+          : boss.name;
+
+        return { name: label, value };
+      })
+    : [{ name: 'No upcoming windows', value: `Nothing starts within the next ${hours} hour(s).` }];
+
+  return new EmbedBuilder()
+    .setTitle(`Upcoming Spawns - next ${hours}h`)
+    .addFields(fields)
+    .setColor(0x00A8FF);
+}
+
 // Ready
 client.once(Events.ClientReady, (c) => {
   console.log(`✅ Logged in as ${c.user.tag}`);
@@ -76,7 +131,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const focused = interaction.options.getFocused(true);
       if (focused?.name === 'boss') {
         const query = String(focused.value || '').toLowerCase();
-        const rows = getAllBossRows();
+        const rows = getAllBossRows(); // static metadata for filtering tracked/untracked
         const isUntracked = (b) => b.respawn_min_hours == null || b.respawn_max_hours == null;
 
         let sourceNames = [];
@@ -87,10 +142,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
             ? listUserSubscriptions(interaction.user.id, interaction.guildId)
             : [];
         } else if (interaction.commandName === 'reset') {
-          // Only bosses with a recorded kill
-          sourceNames = listKilledBosses();
+          // Only bosses with a recorded kill — guild scoped
+          sourceNames = listKilledBosses(interaction.guildId);
         } else if (interaction.commandName === 'details' || interaction.commandName === 'drops') {
-          // All bosses (tracked + untracked)
+          // All bosses (tracked + untracked) for info-only commands
           sourceNames = rows.map(b => b.name);
         } else {
           // Other commands → tracked-only
@@ -175,7 +230,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       const hours = settings.upcoming_hours ?? 3;
-      const embed = buildUpcomingEmbed(hours);
+      const embed = buildUpcomingEmbedForGuild(hours, interaction.guildId);
 
       let messageId = settings.alert_message_id;
       let msg = null;
@@ -275,7 +330,7 @@ async function tickOnce(onlyGuildId = null) {
         const channel = await guild.channels.fetch(gs.alert_channel_id).catch(() => null);
         if (!channel) continue;
 
-        const embed = buildUpcomingEmbed(hours);
+        const embed = buildUpcomingEmbedForGuild(hours, gs.guild_id);
         const msg = await channel.messages.fetch(gs.alert_message_id).catch(() => null);
         if (msg) {
           await msg.edit({ embeds: [embed] });
@@ -288,7 +343,7 @@ async function tickOnce(onlyGuildId = null) {
 
     // 2) Ping role if a window is approaching (and record the message for later cleanup)
     if (gs.ping_role_id && gs.ping_minutes) {
-      const rows = getAllBossRows();
+      const rows = getAllBossRowsForGuild(gs.guild_id);
       const channelGuild = await client.guilds.fetch(gs.guild_id).catch(() => null);
       const channel = channelGuild ? await channelGuild.channels.fetch(gs.alert_channel_id).catch(() => null) : null;
       if (!channel) continue;
@@ -338,7 +393,7 @@ async function tickOnce(onlyGuildId = null) {
 
     // 3) DM alerts to subscribed users when their lead time hits
     try {
-      const rows = getAllBossRows();
+      const rows = getAllBossRowsForGuild(gs.guild_id);
       const regs = listRegisteredUsers(gs.guild_id); // users with alert_minutes set
 
       // For DMs we optionally include the Guild name in the embed footer

@@ -15,6 +15,8 @@ import {
   getUserRegistration,
   removeSubscription,
   getAllBossRows,
+  getAllBossRowsForGuild,   // NEW
+  getBossForGuild,          // NEW
   applyServerReset,
   listKilledBosses
 } from '../db.js';
@@ -51,7 +53,7 @@ function ensureBossExists(inputName) {
   const direct = getBossByName(inputName);
   if (direct) return { boss: direct };
 
-  // Fuzzy match across all bosses
+  // Fuzzy match across all bosses (static metadata)
   const rows = getAllBossRows();
   const norm = (x) => String(x || '')
     .toLowerCase()
@@ -144,9 +146,9 @@ function renderWindowFields(boss, window) {
   };
 }
 
-// ---------- dashboard embed builder (exported for updater) ----------
-export function buildUpcomingEmbed(hours) {
-  const rows = getAllBossRows();
+// Guild-scoped upcoming embed
+function buildUpcomingEmbedForGuild(hours, guildId) {
+  const rows = getAllBossRowsForGuild(guildId);
   const now = nowUtc();
   const horizon = now.plus({ hours });
 
@@ -214,10 +216,10 @@ export async function handleKilled(interaction) {
   const timeStr = interaction.options.getString('server_time_hhmm', false);
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
-  const boss = check.boss;
+  const bossMeta = check.boss;
 
   // Untracked bosses cannot use /killed
-  const guardMsg = guardUntrackedForCommand(boss, 'killed');
+  const guardMsg = guardUntrackedForCommand(bossMeta, 'killed');
   if (guardMsg) return interaction.reply({ ephemeral: true, content: guardMsg });
 
   let deathUtc = nowUtc();
@@ -229,14 +231,14 @@ export async function handleKilled(interaction) {
     deathUtc = parsed > nowUtc() ? parsed.minus({ days: 1 }) : parsed;
   }
 
-  if (!setKilled(boss.name, deathUtc.toISO())) {
+  if (!setKilled(interaction.guildId, bossMeta.name, deathUtc.toISO())) {
     return interaction.reply({ ephemeral: true, content: 'Failed to record kill. (DB)' });
   }
 
   // Force an immediate dashboard refresh
   bus.emit('forceUpdate', { guildId: interaction.guildId });
 
-  const updated = getBossByName(boss.name);
+  const updated = getBossForGuild(interaction.guildId, bossMeta.name);
   const window = computeWindow(updated);
   const killedUnix = toUnixSeconds(deathUtc);
 
@@ -275,7 +277,7 @@ export async function handleServerReset(interaction) {
     resetUtc = parsed > nowUtc() ? parsed.minus({ days: 1 }) : parsed;
   }
 
-  const { updatedNames } = applyServerReset(resetUtc.toISO());
+  const { updatedNames } = applyServerReset(interaction.guildId, resetUtc.toISO());
 
   // Force an immediate dashboard refresh
   bus.emit('forceUpdate', { guildId: interaction.guildId });
@@ -303,7 +305,9 @@ export async function handleStatus(interaction) {
   const bossName = interaction.options.getString('boss', true);
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
-  const boss = check.boss;
+
+  // Fetch guild-scoped state for this boss
+  const boss = getBossForGuild(interaction.guildId, check.boss.name);
 
   // Untracked bosses cannot use /status
   const guardMsg = guardUntrackedForCommand(boss, 'status');
@@ -344,7 +348,7 @@ export async function handleDetails(interaction) {
   const bossName = interaction.options.getString('boss', true);
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
-  const b = check.boss;
+  const b = check.boss; // static metadata is fine for details
 
   const fields = [
     { name: 'Location', value: b.location || 'Unknown', inline: true },
@@ -400,22 +404,25 @@ export async function handleReset(interaction) {
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
 
+  // Use guild-scoped state to verify existence of a recorded kill
+  const bossRow = getBossForGuild(interaction.guildId, check.boss.name);
+
   // Untracked bosses cannot be reset
-  const guardMsg = guardUntrackedForCommand(check.boss, 'reset');
+  const guardMsg = guardUntrackedForCommand(bossRow, 'reset');
   if (guardMsg) return interaction.reply({ ephemeral: true, content: guardMsg });
 
-  if (!check.boss.last_killed_at_utc) {
+  if (!bossRow.last_killed_at_utc) {
     return interaction.reply({ ephemeral: true, content: 'That boss does not currently have a recorded kill — nothing to reset.' });
   }
 
-  const ok = resetBoss(check.boss.name);
+  const ok = resetBoss(interaction.guildId, bossRow.name);
   if (!ok) return interaction.reply({ ephemeral: true, content: 'Failed to reset boss.' });
 
   // Force an immediate dashboard refresh for this guild
   bus.emit('forceUpdate', { guildId: interaction.guildId });
 
   return interaction.reply({
-    embeds: [ new EmbedBuilder().setTitle(`Reset: ${check.boss.name}`).setDescription('Respawn timer cleared. Status is now **Unknown**.').setColor(0xE17055) ]
+    embeds: [ new EmbedBuilder().setTitle(`Reset: ${bossRow.name}`).setDescription('Respawn timer cleared. Status is now **Unknown**.').setColor(0xE17055) ]
   });
 }
 
@@ -452,7 +459,7 @@ export async function handleSubscribeAll(interaction) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /subscribe.' });
   }
 
-  // Only subscribe to tracked bosses
+  // Only subscribe to tracked bosses (static)
   const tracked = getAllBossRows()
     .filter(b => !isUntrackedBoss(b))
     .map(b => b.name);
@@ -548,14 +555,14 @@ export async function handleSetCommandRole(interaction) {
   });
 }
 
-// /upcoming - dynamic hours
+// /upcoming - dynamic hours (guild-scoped)
 export async function handleUpcoming(interaction) {
   if (!isAllowedForStandard(interaction, 'upcoming')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /upcoming.' });
   }
   const hoursArg = interaction.options.getInteger('hours', false);
   const hours = (typeof hoursArg === 'number' ? hoursArg : 3);
-  const embed = buildUpcomingEmbed(hours);
+  const embed = buildUpcomingEmbedForGuild(hours, interaction.guildId);
   return interaction.reply({ embeds: [embed] });
 }
 

@@ -19,12 +19,23 @@ CREATE TABLE IF NOT EXISTS bosses (
   stats_json TEXT,
   drops_json TEXT,
   respawn_notes_json TEXT,
+  /* legacy columns below are no longer used for timers, but retained for compatibility */
   last_killed_at_utc TEXT,
   window_notif_key TEXT,
   parts_json TEXT,
   reset_respawn_min_hours REAL,
   reset_respawn_max_hours REAL,
   last_trigger_kind TEXT
+);
+
+/* NEW: per-guild boss state */
+CREATE TABLE IF NOT EXISTS boss_states (
+  guild_id TEXT,
+  boss_name TEXT,
+  last_killed_at_utc TEXT,
+  window_notif_key TEXT,
+  last_trigger_kind TEXT, -- 'death' | 'reset'
+  PRIMARY KEY (guild_id, boss_name)
 );
 
 CREATE TABLE IF NOT EXISTS guild_settings (
@@ -103,7 +114,7 @@ for (const sql of [
 ]) { try { db.prepare(sql).run(); } catch { /* ignore */ } }
 
 // --------------------------
-// Seeding bosses
+// Seeding bosses (static metadata only)
 // --------------------------
 const insertBoss = db.prepare(`
   INSERT OR IGNORE INTO bosses
@@ -131,32 +142,10 @@ for (const b of bossesSeed) {
 }
 
 // --------------------------
-// Boss timers & queries
+// Static boss metadata
 // --------------------------
-export function setKilled(bossName, utcIsoString) {
-  const windowKey = `${bossName}:${utcIsoString}`;
-  const stmt = db.prepare(`
-    UPDATE bosses
-       SET last_killed_at_utc = ?, window_notif_key = ?, last_trigger_kind = 'death'
-     WHERE name = ?
-  `);
-  const info = stmt.run(utcIsoString, windowKey, bossName);
-  return info.changes > 0;
-}
-
-export function resetBoss(bossName) {
-  const stmt = db.prepare(`
-    UPDATE bosses
-       SET last_killed_at_utc = NULL, window_notif_key = NULL, last_trigger_kind = NULL
-     WHERE name = ?
-  `);
-  const info = stmt.run(bossName);
-  return info.changes > 0;
-}
-
 export function getBossByName(bossName) {
   const normalized = String(bossName || '').trim().replace(/\s+/g, ' ');
-  // Case-insensitive match
   const row = db.prepare(`
     SELECT * FROM bosses
      WHERE name = ? COLLATE NOCASE
@@ -177,16 +166,8 @@ export function listBosses() {
   return rows.map(r => r.name);
 }
 
-export function listKilledBosses() {
-  const rows = db.prepare(`
-    SELECT name FROM bosses
-     WHERE last_killed_at_utc IS NOT NULL
-     ORDER BY name
-  `).all();
-  return rows.map(r => r.name);
-}
-
 export function getAllBossRows() {
+  // static only (no guild state merged)
   return db.prepare(`SELECT * FROM bosses`).all().map(r => ({
     ...r,
     stats: JSON.parse(r.stats_json || '{}'),
@@ -196,18 +177,108 @@ export function getAllBossRows() {
   }));
 }
 
+// --------------------------
+// Per-guild boss state
+// --------------------------
+export function getBossState(guildId, bossName) {
+  return db.prepare(`
+    SELECT * FROM boss_states
+     WHERE guild_id = ? AND boss_name = ? COLLATE NOCASE
+  `).get(guildId, bossName) || null;
+}
+
+export function upsertBossState(guildId, bossName, patch) {
+  const existing = getBossState(guildId, bossName);
+  const merged = {
+    last_killed_at_utc: patch.last_killed_at_utc ?? existing?.last_killed_at_utc ?? null,
+    window_notif_key:   patch.window_notif_key   ?? existing?.window_notif_key   ?? null,
+    last_trigger_kind:  patch.last_trigger_kind  ?? existing?.last_trigger_kind  ?? null
+  };
+  db.prepare(`
+    INSERT INTO boss_states (guild_id, boss_name, last_killed_at_utc, window_notif_key, last_trigger_kind)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(guild_id, boss_name) DO UPDATE SET
+      last_killed_at_utc = excluded.last_killed_at_utc,
+      window_notif_key   = excluded.window_notif_key,
+      last_trigger_kind  = excluded.last_trigger_kind
+  `).run(guildId, bossName, merged.last_killed_at_utc, merged.window_notif_key, merged.last_trigger_kind);
+}
+
+export function setKilled(guildId, bossName, utcIsoString) {
+  const windowKey = `${bossName}:${utcIsoString}`;
+  upsertBossState(guildId, bossName, {
+    last_killed_at_utc: utcIsoString,
+    window_notif_key: windowKey,
+    last_trigger_kind: 'death'
+  });
+  return true;
+}
+
+export function resetBoss(guildId, bossName) {
+  db.prepare(`
+    DELETE FROM boss_states
+     WHERE guild_id = ? AND boss_name = ? COLLATE NOCASE
+  `).run(guildId, bossName);
+  return true;
+}
+
+/** Static + state merged for a single boss (convenience) */
+export function getBossWithState(guildId, bossName) {
+  const b = getBossByName(bossName);
+  if (!b) return null;
+  const s = getBossState(guildId, b.name);
+  return {
+    ...b,
+    last_killed_at_utc: s?.last_killed_at_utc ?? null,
+    window_notif_key: s?.window_notif_key ?? null,
+    last_trigger_kind: s?.last_trigger_kind ?? null
+  };
+}
+
+/** Static + state merged for all bosses in a guild (for schedulers/dashboards) */
+export function getAllBossRowsForGuild(guildId) {
+  const statics = getAllBossRows();
+  const states = db.prepare(`
+    SELECT * FROM boss_states WHERE guild_id = ?
+  `).all(guildId);
+  const byName = new Map(states.map(s => [s.boss_name, s]));
+  return statics.map(b => {
+    const s = byName.get(b.name);
+    return {
+      ...b,
+      last_killed_at_utc: s?.last_killed_at_utc ?? null,
+      window_notif_key: s?.window_notif_key ?? null,
+      last_trigger_kind: s?.last_trigger_kind ?? null
+    };
+  });
+}
+
+export function listKilledBosses(guildId) {
+  const rows = db.prepare(`
+    SELECT boss_name AS name
+      FROM boss_states
+     WHERE guild_id = ? AND last_killed_at_utc IS NOT NULL
+     ORDER BY boss_name
+  `).all(guildId);
+  return rows.map(r => r.name);
+}
+
+// --------------------------
+// Window computation
+// --------------------------
 /**
- * Compute the active window.
- * - If last_trigger_kind === 'reset' and reset_respawn_* exist, use those.
- * - Else, if standard respawn_min/max exist, use them.
- * - Else, return null (untracked boss).
+ * Compute the active window from a merged row that includes:
+ *   - respawn_min_hours / respawn_max_hours (static)
+ *   - reset_respawn_min_hours / reset_respawn_max_hours (static)
+ *   - last_killed_at_utc (state)
+ *   - last_trigger_kind (state)
  */
 export function computeWindow(row) {
   if (!row?.last_killed_at_utc) return null;
 
   const killed = DateTime.fromISO(row.last_killed_at_utc, { zone: 'utc' });
 
-  // Prefer reset-based window when last trigger was a server reset
+  // Prefer reset-based window if last trigger was a server reset AND reset mins/maxes exist
   if (
     row.last_trigger_kind === 'reset' &&
     row.reset_respawn_min_hours != null &&
@@ -218,40 +289,35 @@ export function computeWindow(row) {
     return { start, end, killed, trigger: 'reset' };
   }
 
-  // Fall back to normal (death-based) window if configured
+  // Fall back to standard death-based window if configured
   if (row.respawn_min_hours != null && row.respawn_max_hours != null) {
     const start = killed.plus({ hours: Number(row.respawn_min_hours) });
     const end   = killed.plus({ hours: Number(row.respawn_max_hours) });
     return { start, end, killed, trigger: 'death' };
   }
 
-  // Untracked/static boss
-  return null;
+  return null; // untracked/static boss
 }
 
-/**
- * Apply a server reset at the given ISO timestamp.
- * For all bosses that have reset_respawn_min/max set (not null),
- * set last_killed_at_utc to the reset time and mark last_trigger_kind = 'reset'.
- */
-export function applyServerReset(utcIsoString) {
+// --------------------------
+// Apply server reset (per guild)
+// --------------------------
+export function applyServerReset(guildId, utcIsoString) {
   const eligible = db.prepare(`
     SELECT name FROM bosses
      WHERE reset_respawn_min_hours IS NOT NULL
        AND reset_respawn_max_hours IS NOT NULL
   `).all();
 
-  const update = db.prepare(`
-    UPDATE bosses
-       SET last_killed_at_utc = ?, window_notif_key = ?, last_trigger_kind = 'reset'
-     WHERE name = ?
-  `);
-
   const updatedNames = [];
   for (const r of eligible) {
     const key = `${r.name}:${utcIsoString}`;
-    const info = update.run(utcIsoString, key, r.name);
-    if (info.changes > 0) updatedNames.push(r.name);
+    upsertBossState(guildId, r.name, {
+      last_killed_at_utc: utcIsoString,
+      window_notif_key: key,
+      last_trigger_kind: 'reset'
+    });
+    updatedNames.push(r.name);
   }
   return { updatedNames };
 }

@@ -39,7 +39,8 @@ import {
   markChannelPinged,
   listRegisteredUsers,
   hasUserBeenAlerted,
-  markUserAlerted
+  markUserAlerted,
+  listKilledBosses
 } from './db.js';
 
 import { nowUtc, fmtUtc, toUnixSeconds } from './utils/time.js';
@@ -74,17 +75,23 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (focused?.name === 'boss') {
         const query = String(focused.value || '').toLowerCase();
         let sourceNames;
+
         if (interaction.commandName === 'unsubscribe') {
           const sub = interaction.options.getSubcommand(false);
-          if (!sub || sub === 'boss') {
-            sourceNames = listUserSubscriptions(interaction.user.id, interaction.guildId);
-          } else {
-            sourceNames = listBosses();
-          }
+          sourceNames = (!sub || sub === 'boss')
+            ? listUserSubscriptions(interaction.user.id, interaction.guildId)
+            : listBosses();
+        } else if (interaction.commandName === 'reset') {
+          // ONLY bosses that currently have a recorded kill
+          sourceNames = listKilledBosses();
         } else {
           sourceNames = listBosses();
         }
-        const names = sourceNames.filter(n => n.toLowerCase().includes(query)).slice(0, 25);
+
+        const names = sourceNames
+          .filter(n => n.toLowerCase().includes(query))
+          .slice(0, 25);
+
         return interaction.respond(names.map(n => ({ name: n, value: n })));
       }
     } catch (err) {

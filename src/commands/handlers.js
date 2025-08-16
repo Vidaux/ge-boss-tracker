@@ -300,6 +300,11 @@ export async function handleReset(interaction) {
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
 
+  //  only allow reset if there is something to reset
+  if (!check.boss.last_killed_at_utc) {
+    return interaction.reply({ ephemeral: true, content: 'That boss does not currently have a recorded kill — nothing to reset.' });
+  }
+
   const ok = resetBoss(check.boss.name);
   if (!ok) return interaction.reply({ ephemeral: true, content: 'Failed to reset boss.' });
 
@@ -307,7 +312,12 @@ export async function handleReset(interaction) {
   bus.emit('forceUpdate', { guildId: interaction.guildId });
 
   return interaction.reply({
-    embeds: [ new EmbedBuilder().setTitle(`Reset: ${check.boss.name}`).setDescription('Respawn timer cleared. Status is now **Unknown**.').setColor(0xE17055) ]
+    embeds: [
+      new EmbedBuilder()
+        .setTitle(`Reset: ${check.boss.name}`)
+        .setDescription('Respawn timer cleared. Status is now **Unknown**.')
+        .setColor(0xE17055)
+    ]
   });
 }
 

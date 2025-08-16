@@ -168,6 +168,16 @@ export function computeWindow(row) {
   return { start, end, killed };
 }
 
+export function listKilledBosses() {
+  const rows = db.prepare(`
+    SELECT name FROM bosses
+     WHERE last_killed_at_utc IS NOT NULL
+     ORDER BY name
+  `).all();
+  return rows.map(r => r.name);
+}
+
+
 // --------------------------
 // Guild settings & command roles
 // --------------------------

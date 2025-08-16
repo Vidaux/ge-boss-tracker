@@ -106,8 +106,8 @@ Tracks **Granado Espada** boss respawn windows. Uses **UTC internally** and Disc
 1) **Clone & install**
 ```bash
 cd /opt
-git clone <your-repo-url> ge-boss-bot
-cd ge-boss-bot
+git clone <your-repo-url> ge-boss-tracker
+cd ge-boss-tracker
 npm ci
 
 ```
@@ -124,7 +124,7 @@ npm run register
 ```
 4) **Run the bot (PM2 recommended)**
 ```bash
-pm2 start src/index.js --name ge-boss-bot
+pm2 start src/index.js --name ge-boss-tracker
 pm2 save
 pm2 startup   # optional: start on reboot
 ```
@@ -161,12 +161,12 @@ When generating the OAuth2 URL (Developer Portal), include **scopes**:
 
 ## Data & Reseeding
 
-- Data is stored in `./ge-boss-bot.sqlite`.
+- Data is stored in `./ge-boss-tracker.sqlite`.
 - Boss definitions seed from `src/data/bosses.json` on first run.
 
 To reseed bosses **without** touching guild/user settings:
 
 ```bash
-pm2 stop ge-boss-bot
-sqlite3 ge-boss-bot.sqlite "DELETE FROM bosses; VACUUM;"
-pm2 start ge-boss-bot
+pm2 stop ge-boss-tracker
+sqlite3 ge-boss-tracker.sqlite "DELETE FROM bosses; VACUUM;"
+pm2 start ge-boss-tracker

@@ -36,7 +36,10 @@ import {
   getAllBossRows,
   computeWindow,
   hasChannelBeenPinged,
-  markChannelPinged
+  markChannelPinged,
+  listRegisteredUsers,
+  hasUserBeenAlerted,
+  markUserAlerted
 } from './db.js';
 
 import { nowUtc, fmtUtc, toUnixSeconds } from './utils/time.js';
@@ -317,6 +320,59 @@ async function tickOnce(onlyGuildId = null) {
           }
         }
       }
+    }
+
+    // 3) DM alerts to subscribed users when their lead time hits
+    try {
+      const rows = getAllBossRows();
+      const regs = listRegisteredUsers(gs.guild_id); // users with alert_minutes set
+
+      // For DMs we need the Guild name in the embed footer (optional, but helpful)
+      const guildObj = await client.guilds.fetch(gs.guild_id).catch(() => null);
+
+      for (const reg of regs) {
+        const subs = listUserSubscriptions(reg.user_id, gs.guild_id);
+        if (!subs || subs.length === 0) continue; // opt-in model: no subs, no DMs
+
+        // Only consider bosses this user is subscribed to
+        for (const b of rows) {
+          if (!subs.includes(b.name)) continue;
+          if (!b.last_killed_at_utc) continue;
+
+          const w = computeWindow(b);
+          if (!w) continue;
+
+          const windowKey = `${b.name}:${b.last_killed_at_utc}`;
+          if (hasUserBeenAlerted(reg.user_id, gs.guild_id, b.name, windowKey)) continue;
+
+          // When the user's alert lead time hits
+          const threshold = w.start.minus({ minutes: reg.alert_minutes || 30 });
+          if (now >= threshold && now < w.start) {
+            try {
+              const user = await client.users.fetch(reg.user_id).catch(() => null);
+              if (!user) continue;
+
+              const embed = new EmbedBuilder()
+                .setTitle(`Spawn Approaching - ${b.name}`)
+                .addFields(
+                  { name: 'Window Start',
+                    value: `**Your Time:** <t:${toUnixSeconds(w.start)}:f>\n**Server Time (UTC):** ${fmtUtc(w.start)}` },
+                  { name: 'Window End',
+                    value: `**Your Time:** <t:${toUnixSeconds(w.end)}:f>\n**Server Time (UTC):** ${fmtUtc(w.end)}` }
+                )
+                .setFooter({ text: guildObj ? `Guild: ${guildObj.name}` : 'Boss Alert' })
+                .setColor(0x2ECC71);
+
+              await user.send({ embeds: [embed] }).catch(() => {});
+              markUserAlerted(reg.user_id, gs.guild_id, b.name, windowKey);
+            } catch {
+              // ignore DM errors (user has DMs off, left the server, etc.)
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore per-guild DM errors
     }
   }
 }

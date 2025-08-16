@@ -290,6 +290,15 @@ export function hasUserBeenAlerted(userId, guildId, bossName, windowKey) {
   return !!row?.alerted;
 }
 
+export function listRegisteredUsers(guildId) {
+  return db.prepare(`
+    SELECT user_id, alert_minutes
+      FROM user_registrations
+     WHERE guild_id = ?
+       AND alert_minutes IS NOT NULL
+  `).all(guildId);
+}
+
 // --------------------------
 // Subscriptions (per-boss opt-in)
 // --------------------------

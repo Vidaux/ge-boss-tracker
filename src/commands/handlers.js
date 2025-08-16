@@ -93,28 +93,58 @@ export async function handleKilled(interaction) {
     if (!parsed) {
       return interaction.reply({ ephemeral: true, content: 'Invalid time format. Use HH:MM in UTC, e.g. 21:22' });
     }
-    if (parsed > nowUtc()) deathUtc = parsed.minus({ days: 1 });
-    else deathUtc = parsed;
+    // If HH:MM UTC is still in the future "today", assume they meant yesterday.
+    deathUtc = parsed > nowUtc() ? parsed.minus({ days: 1 }) : parsed;
   }
 
   const ok = setKilled(boss.name, deathUtc.toISO());
   if (!ok) return interaction.reply({ ephemeral: true, content: 'Failed to record kill. (DB)' });
 
-  const deathUnix = toUnixSeconds(deathUtc);
+  // Compute the new window using the updated DB row
+  const updated = getBossByName(boss.name);
+  const window = computeWindow(updated);
+  if (!window) {
+    // Fallback: just show the death time if for some reason window couldn't compute
+    const deathUnix = toUnixSeconds(deathUtc);
+    const embed = new EmbedBuilder()
+      .setTitle(`Recorded Kill: ${boss.name}`)
+      .addFields({
+        name: 'Last Death',
+        value: [
+          `**Your Time:** <t:${deathUnix}:F>`,
+          `**Server Time (UTC):** ${fmtUtc(deathUtc)}`
+        ].join('\n')
+      })
+      .setColor(0x00B894);
+    return interaction.reply({ embeds: [embed] });
+  }
 
-  return interaction.reply({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle(`Recorded Kill: ${boss.name}`)
-        .setDescription(`Respawn window will be recalculated.`)
-        .addFields(
-          { name: 'Server Time (UTC)', value: fmtUtc(deathUtc), inline: true },
-          { name: 'Your Time', value: `<t:${deathUnix}:F>`, inline: true },
-          { name: 'Relative', value: `<t:${deathUnix}:R>` }
-        )
-        .setColor(0x00B894)
-    ]
-  });
+  const killedUnix = toUnixSeconds(window.killed);
+  const startUnix  = toUnixSeconds(window.start);
+  const endUnix    = toUnixSeconds(window.end);
+
+  const embed = new EmbedBuilder()
+    .setTitle(`Recorded Kill: ${boss.name}`)
+    .addFields(
+      {
+        name: 'Last Death',
+        value: [
+          `**Your Time:** <t:${killedUnix}:F>`,
+          `**Server Time (UTC):** ${fmtUtc(window.killed)}`
+        ].join('\n')
+      },
+      {
+        name: 'Respawn Window',
+        value: [
+          `**Your Time:** <t:${startUnix}:F> ~ <t:${endUnix}:F>`,
+          `**Server Time (UTC):** ${fmtUtc(window.start)} ~ ${fmtUtc(window.end)}`
+        ].join('\n')
+      }
+    )
+    .setFooter({ text: 'Server time is UTC. Local times are rendered by Discord.' })
+    .setColor(0x00B894);
+
+  return interaction.reply({ embeds: [embed] });
 }
 
 export async function handleStatus(interaction) {
@@ -144,22 +174,28 @@ export async function handleStatus(interaction) {
   const startUnix = toUnixSeconds(window.start);
   const endUnix = toUnixSeconds(window.end);
 
-  return interaction.reply({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle(`${boss.name} Status`)
-        .addFields(
-          { name: 'Last Death - Server Time', value: fmtUtc(window.killed), inline: true },
-          { name: 'Last Death - Your Time',   value: `<t:${killedUnix}:F>`, inline: true },
-          { name: 'Window Start - Server Time', value: fmtUtc(window.start), inline: true },
-          { name: 'Window Start - Your Time',   value: `<t:${startUnix}:F>`, inline: true },
-          { name: 'Window End - Server Time', value: fmtUtc(window.end), inline: true },
-          { name: 'Window End - Your Time',   value: `<t:${endUnix}:F>`, inline: true },
-        )
-        .setFooter({ text: 'Server time is UTC. Local times are rendered by Discord.' })
-        .setColor(0x0984E3)
-    ]
-  });
+  const embed = new EmbedBuilder()
+    .setTitle(`${boss.name} Status`)
+    .addFields(
+      {
+        name: 'Last Death',
+        value: [
+          `**Your Time:** <t:${killedUnix}:F>`,
+          `**Server Time (UTC):** ${fmtUtc(window.killed)}`
+        ].join('\n')
+      },
+      {
+        name: 'Respawn Window',
+        value: [
+          `**Your Time:** <t:${startUnix}:F> ~ <t:${endUnix}:F>`,
+          `**Server Time (UTC):** ${fmtUtc(window.start)} ~ ${fmtUtc(window.end)}`
+        ].join('\n')
+      }
+    )
+    .setFooter({ text: 'Server time is UTC. Local times are rendered by Discord.' })
+    .setColor(0x0984E3);
+
+  return interaction.reply({ embeds: [embed] });
 }
 
 export async function handleDetails(interaction) {

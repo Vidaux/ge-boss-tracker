@@ -65,17 +65,10 @@ const commands = [
     .addRoleOption(o =>
       o.setName('role').setDescription('Role required to use the command').setRequired(true)),
 
-  // /register timezone
-  new SlashCommandBuilder()
-    .setName('register')
-    .setDescription('Enroll in DM notifications with your timezone')
-    .addStringOption(o =>
-      o.setName('timezone').setDescription('Your timezone (IANA, e.g., America/New_York)').setRequired(true)),
-
   // /setalert minutes
   new SlashCommandBuilder()
     .setName('setalert')
-    .setDescription('Set how many minutes before window you want a DM alert (per user)')
+    .setDescription('Set how many minutes before window you want a DM alert')
     .addIntegerOption(o =>
       o.setName('minutes').setDescription('Minutes (1-1440)').setRequired(true))
 ].map(c => c.toJSON());

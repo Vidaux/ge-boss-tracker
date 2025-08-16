@@ -11,14 +11,12 @@ export function parseServerHHmmToUtcToday(hhmm) {
   return DateTime.utc().set({ hour: H, minute: M, second: 0, millisecond: 0 });
 }
 
-export function fmtBothZones(dtUtc, userTz) {
-  const server = dtUtc.setZone('utc').toFormat("yyyy-LL-dd HH:mm 'UTC'");
-  const local = dtUtc.setZone(userTz).toFormat("yyyy-LL-dd HH:mm ZZZZ");
-  return { server, local };
+// Explicit UTC string for Server Time
+export function fmtUtc(dtUtc) {
+  return dtUtc.setZone('utc').toFormat("yyyy-LL-dd HH:mm 'UTC'");
 }
 
-export function fmtWindowBoth(window, userTz) {
-  const start = fmtBothZones(window.start, userTz);
-  const end = fmtBothZones(window.end, userTz);
-  return { start, end };
+// Discord timestamp tag helpers (<t:UNIX:format>)
+export function toUnixSeconds(dtUtc) {
+  return Math.floor(dtUtc.toSeconds());
 }

@@ -1,9 +1,11 @@
 import {
   getBossByName, listBosses, setKilled, resetBoss, computeWindow,
   getGuildSettings, upsertGuildSettings, setCommandRole, getCommandRole,
-  registerUser, setUserAlertMinutes, getUserRegistration
+  upsertUserAlertMinutes, getUserRegistration
 } from '../db.js';
-import { nowUtc, parseServerHHmmToUtcToday, fmtBothZones, fmtWindowBoth } from '../utils/time.js';
+import {
+  nowUtc, parseServerHHmmToUtcToday, fmtUtc, toUnixSeconds
+} from '../utils/time.js';
 import { EmbedBuilder, PermissionFlagsBits } from 'discord.js';
 
 function titleCase(s){ return s?.trim().replace(/\s+/g, ' ').replace(/\b\w/g, m=>m.toUpperCase()) || ''; }
@@ -61,9 +63,7 @@ export async function handleKilled(interaction) {
   const ok = setKilled(boss.name, deathUtc.toISO());
   if (!ok) return interaction.reply({ ephemeral: true, content: 'Failed to record kill. (DB)' });
 
-  const reg = getUserRegistration(interaction.user.id, interaction.guildId);
-  const userTz = reg?.timezone || 'UTC';
-  const times = fmtBothZones(deathUtc, userTz);
+  const deathUnix = toUnixSeconds(deathUtc);
 
   return interaction.reply({
     embeds: [
@@ -71,8 +71,8 @@ export async function handleKilled(interaction) {
         .setTitle(`Recorded Kill: ${boss.name}`)
         .setDescription(`Respawn window will be recalculated.`)
         .addFields(
-          { name: 'Server Time (UTC)', value: times.server, inline: true },
-          { name: 'Your Time', value: times.local, inline: true }
+          { name: 'Server Time (UTC)', value: fmtUtc(deathUtc), inline: true },
+          { name: 'Your Time', value: `<t:${deathUnix}:F>`, inline: true }
         )
         .setColor(0x00B894)
     ]
@@ -89,9 +89,6 @@ export async function handleStatus(interaction) {
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
   const boss = check.boss;
 
-  const reg = getUserRegistration(interaction.user.id, interaction.guildId);
-  const userTz = reg?.timezone || 'UTC';
-
   if (!boss.last_killed_at_utc) {
     return interaction.reply({
       embeds: [
@@ -105,21 +102,23 @@ export async function handleStatus(interaction) {
   }
 
   const window = computeWindow(boss);
-  const { start, end } = fmtWindowBoth(window, userTz);
-  const killed = fmtBothZones(window.killed, userTz);
+  const killedUnix = toUnixSeconds(window.killed);
+  const startUnix = toUnixSeconds(window.start);
+  const endUnix = toUnixSeconds(window.end);
 
   return interaction.reply({
     embeds: [
       new EmbedBuilder()
         .setTitle(`${boss.name} Status`)
         .addFields(
-          { name: 'Last Death — Server', value: killed.server, inline: true },
-          { name: 'Last Death — Your', value: killed.local, inline: true },
-          { name: 'Window Start — Server', value: start.server, inline: true },
-          { name: 'Window Start — Your', value: start.local, inline: true },
-          { name: 'Window End — Server', value: end.server, inline: true },
-          { name: 'Window End — Your', value: end.local, inline: true }
+          { name: 'Last Death — Server', value: fmtUtc(window.killed), inline: true },
+          { name: 'Last Death — Your',   value: `<t:${killedUnix}:F>`, inline: true },
+          { name: 'Window Start — Server', value: fmtUtc(window.start), inline: true },
+          { name: 'Window Start — Your',   value: `<t:${startUnix}:F>`, inline: true },
+          { name: 'Window End — Server', value: fmtUtc(window.end), inline: true },
+          { name: 'Window End — Your',   value: `<t:${endUnix}:F>`, inline: true }
         )
+        .setFooter({ text: 'Server time is UTC. Local times are rendered by Discord.' })
         .setColor(0x0984E3)
     ]
   });
@@ -234,17 +233,12 @@ export async function handleSetCommandRole(interaction) {
   return interaction.reply({ ephemeral: true, content: `Set role for /${commandName} to ${role}.` });
 }
 
-export async function handleRegister(interaction) {
-  const tz = interaction.options.getString('timezone', true); // Must be a valid IANA TZ
-  registerUser(interaction.user.id, interaction.guildId, tz, 15);
-  return interaction.reply({ ephemeral: true, content: `Registered with timezone **${tz}**. Default alert is 15 minutes.` });
-}
-
+// === New flow: /setalert also enrolls the user (no /register needed)
 export async function handleSetAlert(interaction) {
   const minutes = interaction.options.getInteger('minutes', true);
   if (minutes < 1 || minutes > 1440) {
     return interaction.reply({ ephemeral: true, content: 'Minutes must be between 1 and 1440.' });
   }
-  setUserAlertMinutes(interaction.user.id, interaction.guildId, minutes);
-  return interaction.reply({ ephemeral: true, content: `Alert window set to **${minutes}** minutes before spawn window.` });
+  upsertUserAlertMinutes(interaction.user.id, interaction.guildId, minutes);
+  return interaction.reply({ ephemeral: true, content: `You will be DM’d ~${minutes} minutes before a spawn window starts.` });
 }

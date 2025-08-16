@@ -1,43 +1,31 @@
 # GE Boss Bot
 
-Tracks boss respawn windows for Granado Espada. Supports:
-- `/killed <boss> [server_time_hhmm]` (UTC server time, optional HH:MM)
-- `/status <boss>` (shows respawn window in Server Time + Your Time)
-- `/details <boss>` (location, stats, notes)
-- `/drops <boss>` (drop list)
-- `/reset <boss>` (admin only via role)
-- `/setup [alert_channel] [admin_role] [standard_role]` (admin)
-- `/setcommandrole <command> <role>` gate specific standard commands (admin)
-- `/register <timezone>` (IANA timezone, for “Your Time” and DMs)
-- `/setalert <minutes>` (per-user DM alert minutes before window start)
+Tracks boss respawn windows for Granado Espada. Uses **UTC internally** and Discord **timestamp formatting** so users see local times automatically.
 
-## Requirements
-- Node 18+
-- A Discord application and bot token
-- Invite the bot with `applications.commands` and proper guild permissions
+## Commands
+- `/killed <boss> [server_time_hhmm]` — record a kill. If time is omitted, uses current UTC. If given (`HH:MM`) and is “future today” in UTC, it assumes you meant yesterday.
+- `/status <boss>` — shows window with **Server (UTC)** and **Your Time** (Discord `<t:…>`).
+- `/details <boss>` — location, stats, notes.
+- `/drops <boss>` — drop list.
+- `/reset <boss>` — admin-only reset to Unknown.
+- `/setup [alert_channel] [admin_role] [standard_role]` — admin configuration.
+- `/setcommandrole <command> <role>` — gate a specific standard command.
+- `/setalert <minutes>` — **enrolls** the user for DMs and sets per-user lead time (1–1440).
+
+## DM Alerts
+- The bot checks every minute.
+- For each boss with a known last-death time, it computes the respawn window in **UTC**.
+- For users who ran `/setalert <minutes>`, it sends a DM **~minutes** before the **window start**.
+- Messages show both explicit **Server (UTC)** times and `<t:…>` timestamps for local rendering.
 
 ## Setup
-1. `cp .env.example .env` and fill in `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`.
+1. Fill `.env` with `DISCORD_TOKEN`, `DISCORD_CLIENT_ID` (optional `TEST_GUILD_ID`).
 2. `npm install`
-3. (Optionally set `TEST_GUILD_ID` in `.env` while developing)
-4. Register slash commands:
-    - Test guild: set `TEST_GUILD_ID` in `.env` then run `npm run register`
-    - Global: leave `TEST_GUILD_ID` empty, then `npm run register` (global updates can take a bit to appear)
-5. `npm start`
-
-## First-time in your server
-- `/setup` to set:
-    - `alert_channel` (where start-of-window alerts post)
-    - `admin_role` (controls `/reset` and `/setup`)
-    - `standard_role` (if set, standard commands are gated to that role)
-- (Optional) `/setcommandrole` to gate specific commands like `/killed` separately
-- Users run `/register timezone: America/New_York` (or their TZ)
-- Users can adjust DM lead time: `/setalert 30` (30 minutes before window)
-
-## Adding/Editing Bosses
-- Edit `src/data/bosses.json`, then restart the bot. New/changed bosses are seeded as needed.
+3. `npm run register` (test guild if `TEST_GUILD_ID` set; otherwise global)
+4. `npm start`
+5. In Discord: `/setup` to set alert channel and roles.
+6. Users run `/setalert 30` (for example) to get DMs ~30 minutes before the window.
 
 ## Notes
-- “Server Time” is UTC.
-- If `/killed` is given a future time for “today” in UTC, the bot assumes you meant yesterday.
-- If no `server_time_hhmm` is provided, it uses the current UTC time.
+- Server time is **UTC**.
+- All visible “Your Time” values use Discord’s timestamp feature — clients render them in the viewer’s local time.

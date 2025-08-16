@@ -7,7 +7,7 @@ import bossesSeed from './data/bosses.json' assert { type: 'json' };
 const DB_PATH = path.join(process.cwd(), 'ge-boss-bot.sqlite');
 const db = new Database(DB_PATH);
 
-// Create tables
+// Create tables (timezone column kept optional for backward compatibility; it’s no longer used)
 db.exec(`
 CREATE TABLE IF NOT EXISTS bosses (
   name TEXT PRIMARY KEY,
@@ -18,8 +18,8 @@ CREATE TABLE IF NOT EXISTS bosses (
   stats_json TEXT,
   drops_json TEXT,
   respawn_notes_json TEXT,
-  last_killed_at_utc TEXT,   -- ISO timestamp or NULL
-  window_notif_key TEXT      -- token for current window notifications
+  last_killed_at_utc TEXT,
+  window_notif_key TEXT
 );
 
 CREATE TABLE IF NOT EXISTS guild_settings (
@@ -39,8 +39,8 @@ CREATE TABLE IF NOT EXISTS command_roles (
 CREATE TABLE IF NOT EXISTS user_registrations (
   user_id TEXT,
   guild_id TEXT,
-  timezone TEXT,         -- IANA TZ ("America/New_York")
-  alert_minutes INTEGER, -- default per user if not set via /setalert
+  timezone TEXT,         -- unused now; kept for compatibility
+  alert_minutes INTEGER, -- per-user alert lead time
   PRIMARY KEY (user_id, guild_id)
 );
 
@@ -48,14 +48,13 @@ CREATE TABLE IF NOT EXISTS user_alerts (
   user_id TEXT,
   guild_id TEXT,
   boss_name TEXT,
-  window_key TEXT,      -- identifies a specific spawn window
-  alerted INTEGER,      -- 0/1
+  window_key TEXT,
+  alerted INTEGER,
   PRIMARY KEY (user_id, guild_id, boss_name, window_key)
 );
 `);
 
 // Seed bosses if missing
-const getBoss = db.prepare('SELECT name FROM bosses WHERE name = ?');
 const insertBoss = db.prepare(`
   INSERT OR IGNORE INTO bosses
   (name, location, respawn_min_hours, respawn_max_hours, special_conditions,
@@ -153,20 +152,22 @@ export function getCommandRole(guildId, commandName) {
   return row?.role_id || null;
 }
 
-export function registerUser(userId, guildId, timezone, defaultMinutes = 15) {
-  const stmt = db.prepare(`
-    INSERT INTO user_registrations (user_id, guild_id, timezone, alert_minutes)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(user_id, guild_id) DO UPDATE SET timezone = excluded.timezone
-  `);
-  stmt.run(userId, guildId, timezone, defaultMinutes);
-}
-
-export function setUserAlertMinutes(userId, guildId, minutes) {
-  const stmt = db.prepare(`
-    UPDATE user_registrations SET alert_minutes = ? WHERE user_id = ? AND guild_id = ?
-  `);
-  stmt.run(minutes, userId, guildId);
+// === User alert storage (register-less) ===
+// Upsert the user's alert minutes; this also “enrolls” them for DMs.
+export function upsertUserAlertMinutes(userId, guildId, minutes) {
+  const existing = db.prepare(`
+    SELECT user_id FROM user_registrations WHERE user_id = ? AND guild_id = ?
+  `).get(userId, guildId);
+  if (existing) {
+    db.prepare(`
+      UPDATE user_registrations SET alert_minutes = ? WHERE user_id = ? AND guild_id = ?
+    `).run(minutes, userId, guildId);
+  } else {
+    db.prepare(`
+      INSERT INTO user_registrations (user_id, guild_id, timezone, alert_minutes)
+      VALUES (?, ?, NULL, ?)
+    `).run(userId, guildId, minutes);
+  }
 }
 
 export function getUserRegistration(userId, guildId) {

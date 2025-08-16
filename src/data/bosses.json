@@ -757,5 +757,95 @@
     ],
     "reset_respawn_min_hours": 8,
     "reset_respawn_max_hours": 9
+  },
+  {
+    "name": "Novia",
+    "location": "The Ice Wizard's Tower",
+    "respawn_min_hours": 36,
+    "respawn_max_hours": 72,
+    "server_reset_min_hours": 0,
+    "server_reset_max_hours": 0,
+    "special_conditions": "Collect black magic stones to open the upper floors of the tower",
+    "stats": {
+      "Max HP": 20209025,
+      "A.R.": 66,
+      "ATK": 53054,
+      "D.R.": 66,
+      "DEF": 213,
+      "Fire RES": 0,
+      "Ice RES": 100,
+      "Lightning RES": -100,
+      "Mental RES": 80,
+      "Type": "Human"
+    },
+    "drops": [
+      "Random Ring",
+      "Random Unique Equip",
+      "Random Normal Equip",
+      "Level 84 Elite Equips",
+      "Veteran scroll",
+      "Expert scroll",
+      "Elite Le Noir Armor",
+      "General Plate",
+      "Elite Le Blanc Armor",
+      "Elite Schvarlier Armor",
+      "Elite 84 Equipment",
+      "Level 100 weapon",
+      "Level 100 elite weapon recipe",
+      "Bellem Box",
+      "Ice Weapon",
+      "Level 100 Enchantment Chip",
+      "Grand Level Valkyries Crasher",
+      "+5 Impervium: Normal (Weapon)",
+      "+5 Impervium: Veteran (Weapon)"
+    ],
+    "respawn_notes": [
+      "Initial spawn on server restart",
+      "Spawns 36~72 hours after death"
+    ]
+  },
+  {
+    "name": "Gate of Lightning",
+    "location": "Rio Albi",
+    "respawn_min_hours": 28,
+    "respawn_max_hours": 28,
+    "special_conditions": "Use Lightning Orb to open the gate in Rio Albi. Lightning Orb is one of Federigo's quest rewards.",
+    "stats": {
+      "Max HP": 15122773,
+      "A.R.": 58,
+      "ATK": 41587,
+      "D.R.": 58,
+      "DEF": 165,
+      "Fire RES": -100,
+      "Ice RES": 0,
+      "Lightning RES": 100,
+      "Mental RES": 80,
+      "Type": "Demon"
+    },
+    "drops": [
+      "Random Ring",
+      "Random Unique Equip",
+      "Random Normal Equip",
+      "Level 84 Elite Equips",
+      "Veteran scroll",
+      "Expert scroll",
+      "Elite Le Noir Armor",
+      "General Plate",
+      "Elite Le Blanc Armor",
+      "Elite Schvarlier Armor",
+      "Elite 84 Equipment",
+      "Level 100 weapon",
+      "Level 100 elite weapon recipe",
+      "Bellem Box",
+      "Lightning Weapon",
+      "Level 100 Enchantment Chip",
+      "Grand Level Valkyries Crasher",
+      "+5 Impervium: Normal (Weapon)",
+      "+5 Impervium: Veteran (Weapon)"
+    ],
+    "respawn_notes": [
+      "Spawns 28 hours after death",
+      "Server restart does not affect respawn"
+    ]
   }
 ]

@@ -9,8 +9,10 @@ import {
 
 import {
   handleListBosses,
-  handleSubscribe,
-  handleUnsubscribe,
+  handleSubscribeBoss,
+  handleSubscribeAll,
+  handleUnsubscribeBoss,
+  handleUnsubscribeAll,
   handleKilled,
   handleStatus,
   handleDetails,
@@ -33,10 +35,10 @@ if (!DISCORD_TOKEN) {
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers,   // useful for future DM features
-    GatewayIntentBits.DirectMessages  // allow receiving DM interactions (best practice)
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.DirectMessages
   ],
-  partials: [Partials.Channel]        // required for DMs
+  partials: [Partials.Channel]
 });
 
 // Ready
@@ -44,7 +46,7 @@ client.once(Events.ClientReady, (c) => {
   console.log(`✅ Logged in as ${c.user.tag}`);
 });
 
-// Autocomplete responder (boss list)
+// Autocomplete for boss names
 client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.isAutocomplete()) {
     try {
@@ -63,7 +65,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-// Slash command router
+// Slash commands
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
@@ -73,13 +75,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await handleListBosses(interaction);
         break;
 
-      case 'subscribe':
-        await handleSubscribe(interaction);
+      case 'subscribe': {
+        const sub = interaction.options.getSubcommand();
+        if (sub === 'boss') await handleSubscribeBoss(interaction);
+        else if (sub === 'all') await handleSubscribeAll(interaction);
+        else await interaction.reply({ ephemeral: true, content: 'Unknown /subscribe subcommand.' });
         break;
+      }
 
-      case 'unsubscribe':
-        await handleUnsubscribe(interaction);
+      case 'unsubscribe': {
+        const sub = interaction.options.getSubcommand();
+        if (sub === 'boss') await handleUnsubscribeBoss(interaction);
+        else if (sub === 'all') await handleUnsubscribeAll(interaction);
+        else await interaction.reply({ ephemeral: true, content: 'Unknown /unsubscribe subcommand.' });
         break;
+      }
 
       case 'killed':
         await handleKilled(interaction);
@@ -118,13 +128,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
   } catch (err) {
     console.error(`Error handling /${interaction.commandName}:`, err);
-    // Try to respond gracefully; respect already-replied state
     if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({ ephemeral: true, content: 'Something went wrong executing that command.' })
-        .catch(() => {});
+      await interaction.followUp({ ephemeral: true, content: 'Something went wrong executing that command.' }).catch(() => {});
     } else {
-      await interaction.reply({ ephemeral: true, content: 'Something went wrong executing that command.' })
-        .catch(() => {});
+      await interaction.reply({ ephemeral: true, content: 'Something went wrong executing that command.' }).catch(() => {});
     }
   }
 });

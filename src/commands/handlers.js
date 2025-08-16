@@ -11,6 +11,7 @@ import {
   upsertUserAlertMinutes,
   addSubscription,
   listUserSubscriptions,
+  getUserRegistration,
   removeSubscription
 } from '../db.js';
 
@@ -100,6 +101,15 @@ function dropsField(boss) {
   return { name: 'Drops', value: value.slice(0, 1024) };
 }
 
+function ensureDefaultAlertMinutes(userId, guildId, def = 30) {
+  const reg = getUserRegistration(userId, guildId);
+  if (!reg || reg.alert_minutes == null) {
+    upsertUserAlertMinutes(userId, guildId, def);
+    return true; // default applied
+  }
+  return false;  // already had a value
+}
+
 // ---------- commands ----------
 
 // /listbosses
@@ -112,8 +122,8 @@ export async function handleListBosses(interaction) {
   return interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
-// /subscribe <boss>
-export async function handleSubscribe(interaction) {
+// /subscribe boss <boss>
+export async function handleSubscribeBoss(interaction) {
   if (!isAllowedForStandard(interaction, 'subscribe')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /subscribe.' });
   }
@@ -123,29 +133,50 @@ export async function handleSubscribe(interaction) {
   const boss = check.boss;
 
   addSubscription(interaction.user.id, interaction.guildId, boss.name);
+  const defaulted = ensureDefaultAlertMinutes(interaction.user.id, interaction.guildId, 30);
 
   const current = listUserSubscriptions(interaction.user.id, interaction.guildId);
   const desc = current.length ? current.map(b => `• ${b}`).join('\n') : 'None';
 
   const embed = new EmbedBuilder()
     .setTitle('Subscribed to Boss')
-    .setDescription(`You will receive alerts for **${boss.name}** when you have a /setalert configured.`)
+    .setDescription(`You will receive DM alerts for **${boss.name}**.` + (defaulted ? `\nDefault alert lead time set to **30 minutes**. Adjust with **/setalert**.` : ''))
     .addFields({ name: 'Your Subscriptions', value: desc })
     .setColor(0x1ABC9C);
 
   return interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
-// /unsubscribe <boss>
-export async function handleUnsubscribe(interaction) {
+// /subscribe all
+export async function handleSubscribeAll(interaction) {
+  if (!isAllowedForStandard(interaction, 'subscribe')) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /subscribe.' });
+  }
+
+  const bosses = listBosses();
+  for (const name of bosses) addSubscription(interaction.user.id, interaction.guildId, name);
+  const defaulted = ensureDefaultAlertMinutes(interaction.user.id, interaction.guildId, 30);
+
+  const current = listUserSubscriptions(interaction.user.id, interaction.guildId);
+  const desc = current.length ? current.map(b => `• ${b}`).join('\n') : 'None';
+
+  const embed = new EmbedBuilder()
+    .setTitle('Subscribed to All Bosses')
+    .setDescription(`You will receive DM alerts for **all bosses**.` + (defaulted ? `\nDefault alert lead time set to **30 minutes**. Adjust with **/setalert**.` : ''))
+    .addFields({ name: 'Your Subscriptions', value: desc })
+    .setColor(0x1ABC9C);
+
+  return interaction.reply({ embeds: [embed], ephemeral: true });
+}
+
+// /unsubscribe boss <boss>
+export async function handleUnsubscribeBoss(interaction) {
   if (!isAllowedForStandard(interaction, 'unsubscribe')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /unsubscribe.' });
   }
   const bossName = titleCase(interaction.options.getString('boss', true));
   const check = ensureBossExists(bossName);
-  if (check.error) {
-    return interaction.reply({ ephemeral: true, content: check.error });
-  }
+  if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
   const boss = check.boss;
 
   const removed = removeSubscription(interaction.user.id, interaction.guildId, boss.name);
@@ -155,13 +186,27 @@ export async function handleUnsubscribe(interaction) {
 
   const embed = new EmbedBuilder()
     .setTitle(removed ? 'Unsubscribed from Boss' : 'Not Subscribed')
-    .setDescription(
-      removed
-        ? `You will no longer receive alerts for **${boss.name}**.`
-        : `You were not subscribed to **${boss.name}**.`
-    )
+    .setDescription(removed ? `You will no longer receive alerts for **${boss.name}**.` : `You were not subscribed to **${boss.name}**.`)
     .addFields({ name: 'Your Subscriptions', value: desc })
     .setColor(removed ? 0xE17055 : 0x95A5A6);
+
+  return interaction.reply({ embeds: [embed], ephemeral: true });
+}
+
+// /unsubscribe all
+export async function handleUnsubscribeAll(interaction) {
+  if (!isAllowedForStandard(interaction, 'unsubscribe')) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /unsubscribe.' });
+  }
+
+  const current = listUserSubscriptions(interaction.user.id, interaction.guildId);
+  for (const name of current) removeSubscription(interaction.user.id, interaction.guildId, name);
+
+  const embed = new EmbedBuilder()
+    .setTitle('Unsubscribed from All Bosses')
+    .setDescription('You will no longer receive DM alerts for any boss.')
+    .addFields({ name: 'Your Subscriptions', value: 'None' })
+    .setColor(0xE17055);
 
   return interaction.reply({ embeds: [embed], ephemeral: true });
 }
@@ -442,12 +487,12 @@ export async function handleSetCommandRole(interaction) {
   return interaction.reply({ ephemeral: true, content: `Set role for /${commandName} to ${role}.` });
 }
 
-// /setalert
+// /setalert minutes => only updates lead time (no auto-subscribe)
 export async function handleSetAlert(interaction) {
   const minutes = interaction.options.getInteger('minutes', true);
   if (minutes < 1 || minutes > 1440) {
     return interaction.reply({ ephemeral: true, content: 'Minutes must be between 1 and 1440.' });
   }
   upsertUserAlertMinutes(interaction.user.id, interaction.guildId, minutes);
-  return interaction.reply({ ephemeral: true, content: `You will be DM’d ~${minutes} minutes before a subscribed (or all) boss window starts.` });
+  return interaction.reply({ ephemeral: true, content: `DM alert lead time set to **~${minutes} minutes** before a subscribed boss window.` });
 }

@@ -13,7 +13,7 @@ if (!DISCORD_TOKEN || !DISCORD_CLIENT_ID) {
   process.exit(1);
 }
 
-// Common boss option with autocomplete enabled
+// Reusable boss option with autocomplete
 const bossOption = (opt) =>
   opt.setName('boss')
      .setDescription('Boss name')
@@ -22,7 +22,7 @@ const bossOption = (opt) =>
 
 const commands = [];
 
-// /status
+/** /status */
 commands.push(
   new SlashCommandBuilder()
     .setName('status')
@@ -31,7 +31,7 @@ commands.push(
     .setDMPermission(false)
 );
 
-// /details
+/** /details */
 commands.push(
   new SlashCommandBuilder()
     .setName('details')
@@ -40,7 +40,7 @@ commands.push(
     .setDMPermission(false)
 );
 
-// /drops
+/** /drops */
 commands.push(
   new SlashCommandBuilder()
     .setName('drops')
@@ -49,7 +49,7 @@ commands.push(
     .setDMPermission(false)
 );
 
-// /killed
+/** /killed */
 commands.push(
   new SlashCommandBuilder()
     .setName('killed')
@@ -63,34 +63,41 @@ commands.push(
     .setDMPermission(false)
 );
 
-// /subscribe
+/** /subscribe with subcommands */
 commands.push(
   new SlashCommandBuilder()
     .setName('subscribe')
-    .setDescription('Subscribe to DM alerts for a boss (requires /setalert)')
-    .addStringOption(bossOption)
+    .setDescription('Subscribe to DM alerts')
+    .addSubcommand(sc =>
+      sc.setName('boss')
+        .setDescription('Subscribe to a single boss')
+        .addStringOption(bossOption)
+    )
+    .addSubcommand(sc =>
+      sc.setName('all')
+        .setDescription('Subscribe to ALL bosses')
+    )
     .setDMPermission(false)
 );
 
-// /unsubscribe
+/** /unsubscribe with subcommands */
 commands.push(
   new SlashCommandBuilder()
     .setName('unsubscribe')
-    .setDescription('Unsubscribe from DM alerts for a boss')
-    .addStringOption(bossOption)
+    .setDescription('Unsubscribe from DM alerts')
+    .addSubcommand(sc =>
+      sc.setName('boss')
+        .setDescription('Unsubscribe from a single boss')
+        .addStringOption(bossOption)
+    )
+    .addSubcommand(sc =>
+      sc.setName('all')
+        .setDescription('Unsubscribe from ALL bosses')
+    )
     .setDMPermission(false)
 );
 
-// /reset
-commands.push(
-  new SlashCommandBuilder()
-    .setName('reset')
-    .setDescription('Admin: clear the respawn timer for a boss')
-    .addStringOption(bossOption)
-    .setDMPermission(false)
-);
-
-// /listbosses
+/** /listbosses */
 commands.push(
   new SlashCommandBuilder()
     .setName('listbosses')
@@ -98,7 +105,7 @@ commands.push(
     .setDMPermission(false)
 );
 
-// /setup
+/** /setup */
 commands.push(
   new SlashCommandBuilder()
     .setName('setup')
@@ -122,9 +129,11 @@ commands.push(
     .setDMPermission(false)
 );
 
-// /setcommandrole
+/** /setcommandrole */
 const gateableCommands = [
-  'status', 'details', 'drops', 'killed', 'subscribe', 'unsubscribe', 'reset'
+  'status', 'details', 'drops', 'killed',
+  'subscribe', 'unsubscribe',
+  'reset'
 ];
 
 commands.push(
@@ -146,14 +155,14 @@ commands.push(
     .setDMPermission(false)
 );
 
-// /setalert
+/** /setalert */
 commands.push(
   new SlashCommandBuilder()
     .setName('setalert')
     .setDescription('Set how many minutes before window start you want a DM')
     .addIntegerOption(o =>
       o.setName('minutes')
-       .setDescription('1–1440 minutes')
+       .setDescription('1–1440 minutes (default is 30)')
        .setMinValue(1)
        .setMaxValue(1440)
        .setRequired(true)

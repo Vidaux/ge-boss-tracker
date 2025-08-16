@@ -149,15 +149,12 @@ export async function handleStatus(interaction) {
       new EmbedBuilder()
         .setTitle(`${boss.name} Status`)
         .addFields(
-          { name: 'Last Death — Server', value: fmtUtc(window.killed), inline: true },
-          { name: 'Last Death — Your',   value: `<t:${killedUnix}:F>`, inline: true },
-          { name: 'Last Death — Relative', value: `<t:${killedUnix}:R>` },
-          { name: 'Window Start — Server', value: fmtUtc(window.start), inline: true },
-          { name: 'Window Start — Your',   value: `<t:${startUnix}:F>`, inline: true },
-          { name: 'Window Start — Relative', value: `<t:${startUnix}:R>` },
-          { name: 'Window End — Server', value: fmtUtc(window.end), inline: true },
-          { name: 'Window End — Your',   value: `<t:${endUnix}:F>`, inline: true },
-          { name: 'Window End — Relative', value: `<t:${endUnix}:R>` }
+          { name: 'Last Death - Server Time', value: fmtUtc(window.killed), inline: true },
+          { name: 'Last Death - Your Time',   value: `<t:${killedUnix}:F>`, inline: true },
+          { name: 'Window Start - Server Time', value: fmtUtc(window.start), inline: true },
+          { name: 'Window Start - Your Time',   value: `<t:${startUnix}:F>`, inline: true },
+          { name: 'Window End - Server Time', value: fmtUtc(window.end), inline: true },
+          { name: 'Window End - Your Time',   value: `<t:${endUnix}:F>`, inline: true },
         )
         .setFooter({ text: 'Server time is UTC. Local times are rendered by Discord.' })
         .setColor(0x0984E3)
@@ -175,13 +172,13 @@ export async function handleDetails(interaction) {
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
   const b = check.boss;
 
-  const statsLines = Object.entries(b.stats || {}).map(([k, v]) => `**${k}**: ${v}`).join('\n') || '—';
-  const notes = (b.respawn_notes || []).map(n => `• ${n}`).join('\n') || '—';
+  const statsLines = Object.entries(b.stats || {}).map(([k, v]) => `**${k}**: ${v}`).join('\n') || '-';
+  const notes = (b.respawn_notes || []).map(n => `• ${n}`).join('\n') || '-';
 
   return interaction.reply({
     embeds: [
       new EmbedBuilder()
-        .setTitle(`${b.name} — Details`)
+        .setTitle(`${b.name} - Details`)
         .addFields(
           { name: 'Location', value: b.location || 'Unknown', inline: true },
           { name: 'Respawn Pattern', value: `${b.respawn_min_hours}–${b.respawn_max_hours} hours after death`, inline: true },
@@ -202,12 +199,12 @@ export async function handleDrops(interaction) {
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
   const b = check.boss;
-  const drops = (b.drops || []).map(d => `• ${d}`).join('\n') || '—';
+  const drops = (b.drops || []).map(d => `• ${d}`).join('\n') || '-';
 
   return interaction.reply({
     embeds: [
       new EmbedBuilder()
-        .setTitle(`${b.name} — Drops`)
+        .setTitle(`${b.name} - Drops`)
         .setDescription(drops)
         .setColor(0x00CEC9)
     ]

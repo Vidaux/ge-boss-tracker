@@ -3,14 +3,14 @@
 Tracks boss respawn windows for Granado Espada. Uses **UTC internally** and Discord **timestamp formatting** so users see local times automatically.
 
 ## Commands
-- `/killed <boss> [server_time_hhmm]` — record a kill. If time is omitted, uses current UTC. If given (`HH:MM`) and is “future today” in UTC, it assumes you meant yesterday.
-- `/status <boss>` — shows window with **Server (UTC)** and **Your Time** (Discord `<t:…>`).
-- `/details <boss>` — location, stats, notes.
-- `/drops <boss>` — drop list.
-- `/reset <boss>` — admin-only reset to Unknown.
-- `/setup [alert_channel] [admin_role] [standard_role]` — admin configuration.
-- `/setcommandrole <command> <role>` — gate a specific standard command.
-- `/setalert <minutes>` — **enrolls** the user for DMs and sets per-user lead time (1–1440).
+- `/killed <boss> [server_time_hhmm]` - record a kill. If time is omitted, uses current UTC. If given (`HH:MM`) and is “future today” in UTC, it assumes you meant yesterday.
+- `/status <boss>` - shows window with **Server (UTC)** and **Your Time** (Discord `<t:…>`).
+- `/details <boss>` - location, stats, notes.
+- `/drops <boss>` - drop list.
+- `/reset <boss>` - admin-only reset to Unknown.
+- `/setup [alert_channel] [admin_role] [standard_role]` - admin configuration.
+- `/setcommandrole <command> <role>` - gate a specific standard command.
+- `/setalert <minutes>` - **enrolls** the user for DMs and sets per-user lead time (1–1440).
 
 ## DM Alerts
 - The bot checks every minute.
@@ -28,11 +28,11 @@ Tracks boss respawn windows for Granado Espada. Uses **UTC internally** and Disc
 
 ## Notes
 - Server time is **UTC**.
-- All visible “Your Time” values use Discord’s timestamp feature — clients render them in the viewer’s local time.
+- All visible “Your Time” values use Discord’s timestamp feature - clients render them in the viewer’s local time.
 
 ## New Commands
-- `/listbosses` — lists all known bosses.
-- `/subscribe <boss>` — subscribe to alerts for a specific boss.
+- `/listbosses` - lists all known bosses.
+- `/subscribe <boss>` - subscribe to alerts for a specific boss.
     - If a user has **any** subscriptions, they’ll only receive DMs for those bosses.
     - If a user has **no** subscriptions, they’ll receive DMs for **all** bosses (when `/setalert` is set).
 

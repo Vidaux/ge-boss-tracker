@@ -100,11 +100,11 @@ setInterval(async () => {
               .setTitle(`Spawn Window Incoming: ${b.name}`)
               .setDescription(`Heads up! Spawn window starts in ~${minutesBefore} minutes.`)
               .addFields(
-                { name: 'Window Start — Server', value: fmtUtc(window.start), inline: true },
-                { name: 'Window Start — Your',   value: `<t:${startUnix}:F>`, inline: true },
+                { name: 'Window Start - Server', value: fmtUtc(window.start), inline: true },
+                { name: 'Window Start - Your',   value: `<t:${startUnix}:F>`, inline: true },
                 { name: 'Relative to Start', value: `<t:${startUnix}:R>` },
-                { name: 'Window End — Server', value: fmtUtc(window.end), inline: true },
-                { name: 'Window End — Your',   value: `<t:${endUnix}:F>`, inline: true },
+                { name: 'Window End - Server', value: fmtUtc(window.end), inline: true },
+                { name: 'Window End - Your',   value: `<t:${endUnix}:F>`, inline: true },
                 { name: 'Relative to End', value: `<t:${endUnix}:R>` }
               )
               .setColor(0xFDCB6E);

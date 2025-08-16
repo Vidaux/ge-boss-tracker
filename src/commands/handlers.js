@@ -380,6 +380,22 @@ export async function handleSubscriptions(interaction) {
   return interaction.reply({ embeds: [ new EmbedBuilder().setTitle('Your Subscriptions').setDescription(desc).setColor(0x8E44AD) ], ephemeral: true });
 }
 
+// /setalert — set user DM lead time only (1–1440)
+export async function handleSetAlert(interaction) {
+  if (!isAllowedForStandard(interaction, 'setalert')) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /setalert.' });
+  }
+
+  const minutes = interaction.options.getInteger('minutes', true);
+  if (minutes < 1 || minutes > 1440) {
+    return interaction.reply({ ephemeral: true, content: 'Minutes must be between 1 and 1440.' });
+  }
+
+  upsertUserAlertMinutes(interaction.user.id, interaction.guildId, minutes);
+  return interaction.reply({ ephemeral: true, content: `Your alert lead time is now **${minutes} minutes** before window start.` });
+}
+
+
 // /upcoming - dynamic hours
 export async function handleUpcoming(interaction) {
   if (!isAllowedForStandard(interaction, 'upcoming')) {

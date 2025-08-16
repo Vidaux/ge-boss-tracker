@@ -4,7 +4,8 @@ import {
   Client,
   GatewayIntentBits,
   Partials,
-  Events
+  Events,
+  EmbedBuilder
 } from 'discord.js';
 
 import {
@@ -263,7 +264,7 @@ async function tickOnce() {
               content: `<@&${gs.ping_role_id}>`,
               allowedMentions: { roles: [gs.ping_role_id] },
               embeds: [
-                new (require('discord.js').EmbedBuilder)()
+                new EmbedBuilder()
                   .setTitle(`Spawn Approaching - ${b.name}`)
                   .addFields(
                     { name: 'Starts In', value: `**Your Time:** <t:${toUnixSeconds(w.start)}:f>\n**Server Time (UTC):** ${fmtUtc(w.start)}` },

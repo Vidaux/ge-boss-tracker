@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { DateTime } from 'luxon';
 import path from 'node:path';
-import bossesSeed from './data/bosses.json' assert { type: 'json' };
+import bossesSeed from './data/bosses.json' with { type: 'json' };
 
 const DB_PATH = path.join(process.cwd(), 'ge-boss-bot.sqlite');
 const db = new Database(DB_PATH);

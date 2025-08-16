@@ -6,7 +6,6 @@ import {
   computeWindow,
   getGuildSettings,
   upsertGuildSettings,
-  getAllGuildSettings,
   setCommandRole,
   getCommandRole,
   upsertUserAlertMinutes,

@@ -6,19 +6,22 @@ import bossesSeed from './data/bosses.json' assert { type: 'json' };
 const DB_PATH = path.join(process.cwd(), 'ge-boss-bot.sqlite');
 const db = new Database(DB_PATH);
 
-// Create tables
+// --------------------------
+// Schema & lightweight migrations
+// --------------------------
 db.exec(`
 CREATE TABLE IF NOT EXISTS bosses (
   name TEXT PRIMARY KEY,
   location TEXT,
-  respawn_min_hours INTEGER,
-  respawn_max_hours INTEGER,
+  respawn_min_hours REAL,
+  respawn_max_hours REAL,
   special_conditions TEXT,
   stats_json TEXT,
   drops_json TEXT,
   respawn_notes_json TEXT,
   last_killed_at_utc TEXT,
-  window_notif_key TEXT
+  window_notif_key TEXT,
+  parts_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS guild_settings (
@@ -38,7 +41,7 @@ CREATE TABLE IF NOT EXISTS command_roles (
 CREATE TABLE IF NOT EXISTS user_registrations (
   user_id TEXT,
   guild_id TEXT,
-  timezone TEXT,         -- unused; kept for compatibility
+  timezone TEXT,         -- unused; kept for backward compatibility
   alert_minutes INTEGER, -- per-user alert lead time
   PRIMARY KEY (user_id, guild_id)
 );
@@ -52,7 +55,6 @@ CREATE TABLE IF NOT EXISTS user_alerts (
   PRIMARY KEY (user_id, guild_id, boss_name, window_key)
 );
 
--- NEW: per-boss subscriptions
 CREATE TABLE IF NOT EXISTS user_subscriptions (
   user_id TEXT,
   guild_id TEXT,
@@ -61,13 +63,18 @@ CREATE TABLE IF NOT EXISTS user_subscriptions (
 );
 `);
 
-// Seed bosses
+// Lightweight migration (safe if column already exists)
+try { db.prepare(`ALTER TABLE bosses ADD COLUMN parts_json TEXT`).run(); } catch { /* already exists */ }
+
+// --------------------------
+// Seeding
+// --------------------------
 const insertBoss = db.prepare(`
   INSERT OR IGNORE INTO bosses
   (name, location, respawn_min_hours, respawn_max_hours, special_conditions,
-   stats_json, drops_json, respawn_notes_json, last_killed_at_utc, window_notif_key)
+   stats_json, drops_json, respawn_notes_json, last_killed_at_utc, window_notif_key, parts_json)
   VALUES (@name, @location, @respawn_min_hours, @respawn_max_hours, @special_conditions,
-          @stats_json, @drops_json, @respawn_notes_json, NULL, NULL)
+          @stats_json, @drops_json, @respawn_notes_json, NULL, NULL, @parts_json)
 `);
 for (const b of bossesSeed) {
   insertBoss.run({
@@ -78,26 +85,32 @@ for (const b of bossesSeed) {
     special_conditions: b.special_conditions ?? '',
     stats_json: JSON.stringify(b.stats ?? {}),
     drops_json: JSON.stringify(b.drops ?? []),
-    respawn_notes_json: JSON.stringify(b.respawn_notes ?? [])
+    respawn_notes_json: JSON.stringify(b.respawn_notes ?? []),
+    parts_json: JSON.stringify(b.parts ?? null)
   });
 }
 
+// --------------------------
+// Boss timers & queries
+// --------------------------
 export function setKilled(bossName, utcIsoString) {
   const windowKey = `${bossName}:${utcIsoString}`;
-  const info = db.prepare(`
+  const stmt = db.prepare(`
     UPDATE bosses
        SET last_killed_at_utc = ?, window_notif_key = ?
      WHERE name = ?
-  `).run(utcIsoString, windowKey, bossName);
+  `);
+  const info = stmt.run(utcIsoString, windowKey, bossName);
   return info.changes > 0;
 }
 
 export function resetBoss(bossName) {
-  const info = db.prepare(`
+  const stmt = db.prepare(`
     UPDATE bosses
        SET last_killed_at_utc = NULL, window_notif_key = NULL
      WHERE name = ?
-  `).run(bossName);
+  `);
+  const info = stmt.run(bossName);
   return info.changes > 0;
 }
 
@@ -108,7 +121,8 @@ export function getBossByName(bossName) {
     ...row,
     stats: JSON.parse(row.stats_json || '{}'),
     drops: JSON.parse(row.drops_json || '[]'),
-    respawn_notes: JSON.parse(row.respawn_notes_json || '[]')
+    respawn_notes: JSON.parse(row.respawn_notes_json || '[]'),
+    parts: JSON.parse(row.parts_json || 'null') // array or null
   };
 }
 
@@ -117,6 +131,28 @@ export function listBosses() {
   return rows.map(r => r.name);
 }
 
+export function getAllBossRows() {
+  return db.prepare(`SELECT * FROM bosses`).all().map(r => ({
+    ...r,
+    stats: JSON.parse(r.stats_json || '{}'),
+    drops: JSON.parse(r.drops_json || '[]'),
+    respawn_notes: JSON.parse(r.respawn_notes_json || '[]'),
+    parts: JSON.parse(r.parts_json || 'null')
+  }));
+}
+
+// Compute window using UTC; supports fractional hours (e.g., 10.5)
+export function computeWindow(row) {
+  if (!row?.last_killed_at_utc) return null;
+  const killed = DateTime.fromISO(row.last_killed_at_utc, { zone: 'utc' });
+  const start = killed.plus({ hours: row.respawn_min_hours });
+  const end   = killed.plus({ hours: row.respawn_max_hours });
+  return { start, end, killed };
+}
+
+// --------------------------
+// Guild settings & command roles
+// --------------------------
 export function upsertGuildSettings(guildId, settings) {
   const existing = db.prepare(`SELECT 1 FROM guild_settings WHERE guild_id = ?`).get(guildId);
   if (existing) {
@@ -154,14 +190,18 @@ export function getCommandRole(guildId, commandName) {
   return row?.role_id || null;
 }
 
-// Alerts (register-less)
+// --------------------------
+// User alerts (per-user lead time)
+// --------------------------
 export function upsertUserAlertMinutes(userId, guildId, minutes) {
-  const existing = db.prepare(`
+  const exists = db.prepare(`
     SELECT 1 FROM user_registrations WHERE user_id = ? AND guild_id = ?
   `).get(userId, guildId);
-  if (existing) {
+  if (exists) {
     db.prepare(`
-      UPDATE user_registrations SET alert_minutes = ? WHERE user_id = ? AND guild_id = ?
+      UPDATE user_registrations
+         SET alert_minutes = ?
+       WHERE user_id = ? AND guild_id = ?
     `).run(minutes, userId, guildId);
   } else {
     db.prepare(`
@@ -186,24 +226,15 @@ export function markUserAlerted(userId, guildId, bossName, windowKey) {
 
 export function hasUserBeenAlerted(userId, guildId, bossName, windowKey) {
   const row = db.prepare(`
-    SELECT alerted FROM user_alerts WHERE user_id = ? AND guild_id = ? AND boss_name = ? AND window_key = ?
+    SELECT alerted FROM user_alerts
+     WHERE user_id = ? AND guild_id = ? AND boss_name = ? AND window_key = ?
   `).get(userId, guildId, bossName, windowKey);
   return !!row?.alerted;
 }
 
-export function getAllBossRows() {
-  return db.prepare(`SELECT * FROM bosses`).all();
-}
-
-export function computeWindow(row) {
-  if (!row?.last_killed_at_utc) return null;
-  const killed = DateTime.fromISO(row.last_killed_at_utc, { zone: 'utc' });
-  const start = killed.plus({ hours: row.respawn_min_hours });
-  const end = killed.plus({ hours: row.respawn_max_hours });
-  return { start, end, killed };
-}
-
-// === Subscriptions ===
+// --------------------------
+// Subscriptions (per-boss opt-in)
+// --------------------------
 export function addSubscription(userId, guildId, bossName) {
   db.prepare(`
     INSERT OR IGNORE INTO user_subscriptions (user_id, guild_id, boss_name)
@@ -213,7 +244,9 @@ export function addSubscription(userId, guildId, bossName) {
 
 export function listUserSubscriptions(userId, guildId) {
   const rows = db.prepare(`
-    SELECT boss_name FROM user_subscriptions WHERE user_id = ? AND guild_id = ? ORDER BY boss_name
+    SELECT boss_name FROM user_subscriptions
+     WHERE user_id = ? AND guild_id = ?
+     ORDER BY boss_name
   `).all(userId, guildId);
   return rows.map(r => r.boss_name);
 }
@@ -227,7 +260,8 @@ export function userHasAnySubscriptions(userId, guildId) {
 
 export function isUserSubscribedTo(userId, guildId, bossName) {
   const row = db.prepare(`
-    SELECT 1 FROM user_subscriptions WHERE user_id = ? AND guild_id = ? AND boss_name = ?
+    SELECT 1 FROM user_subscriptions
+     WHERE user_id = ? AND guild_id = ? AND boss_name = ?
   `).get(userId, guildId, bossName);
   return !!row;
 }

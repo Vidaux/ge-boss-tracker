@@ -84,23 +84,25 @@
     ]
   },
   {
-    "name": "Rafflesia (Legs)",
+    "name": "Rafflesia",
     "location": "Rafflesia (entrance located in Ustiur, Zona Uno)",
     "respawn_min_hours": 24,
     "respawn_max_hours": 48,
     "special_conditions": "The Green, Yellow and Red leaves of Rafflesia are required to enter the boss room.",
-    "stats": {
-      "Max HP": 2009721,
-      "A.R.": 54,
-      "ATK": 39014,
-      "D.R.": 54,
-      "DEF": 118,
-      "Fire RES": 40,
-      "Ice RES": 40,
-      "Lightning RES": 40,
-      "Mental RES": 40,
-      "Type": "Wildlife"
-    },
+    "parts": [
+      {
+        "name": "Legs",
+        "stats": { "Max HP": 2009721, "A.R.": 54, "ATK": 39014, "D.R.": 54, "DEF": 118, "Fire RES": 40, "Ice RES": 40, "Lightning RES": 40, "Mental RES": 40, "Type": "Wildlife" }
+      },
+      {
+        "name": "Egg",
+        "stats": { "Max HP": 2926706, "A.R.": 62, "ATK": 14221, "D.R.": 62, "DEF": 133, "Fire RES": 60, "Ice RES": 60, "Lightning RES": 60, "Mental RES": 60, "Type": "Wildlife" }
+      },
+      {
+        "name": "Torso",
+        "stats": { "Max HP": 1292245, "A.R.": 57, "ATK": 64818, "D.R.": 57, "DEF": 123, "Fire RES": 45, "Ice RES": 45, "Lightning RES": 45, "Mental RES": 45, "Type": "Wildlife" }
+      }
+    ],
     "drops": [
       "Grand Level Valkyries Crasher",
       "Random Unique Equip",
@@ -114,73 +116,8 @@
     "respawn_notes": [
       "Spawns 24~48 hours after death",
       "Server restart does not affect respawn"
-    ]
-  },
-  {
-    "name": "Rafflesia (Egg)",
-    "location": "Rafflesia (entrance located in Ustiur, Zona Uno)",
-    "respawn_min_hours": 24,
-    "respawn_max_hours": 48,
-    "special_conditions": "The Green, Yellow and Red leaves of Rafflesia are required to enter the boss room.",
-    "stats": {
-      "Max HP": 2926706,
-      "A.R.": 62,
-      "ATK": 14221,
-      "D.R.": 62,
-      "DEF": 133,
-      "Fire RES": 60,
-      "Ice RES": 60,
-      "Lightning RES": 60,
-      "Mental RES": 60,
-      "Type": "Wildlife"
-    },
-    "drops": [
-      "Grand Level Valkyries Crasher",
-      "Random Unique Equip",
-      "Random Normal Equip",
-      "Level 92 elite armor recipes",
-      "Level 84 Elite equips",
-      "Level 100 Armor",
-      "Veteran Scroll",
-      "Expert Scroll"
     ],
-    "respawn_notes": [
-      "Spawns 24~48 hours after death",
-      "Server restart does not affect respawn"
-    ]
-  },
-  {
-    "name": "Rafflesia (Torso)",
-    "location": "Rafflesia (entrance located in Ustiur, Zona Uno)",
-    "respawn_min_hours": 24,
-    "respawn_max_hours": 48,
-    "special_conditions": "The Green, Yellow and Red leaves of Rafflesia are required to enter the boss room.",
-    "stats": {
-      "Max HP": 1292245,
-      "A.R.": 57,
-      "ATK": 64818,
-      "D.R.": 57,
-      "DEF": 123,
-      "Fire RES": 45,
-      "Ice RES": 45,
-      "Lightning RES": 45,
-      "Mental RES": 45,
-      "Type": "Wildlife"
-    },
-    "drops": [
-      "Grand Level Valkyries Crasher",
-      "Random Unique Equip",
-      "Random Normal Equip",
-      "Level 92 elite armor recipes",
-      "Level 84 Elite equips",
-      "Level 100 Armor",
-      "Veteran Scroll",
-      "Expert Scroll"
-    ],
-    "respawn_notes": [
-      "Spawns 24~48 hours after death",
-      "Server restart does not affect respawn"
-    ]
+    "stats": {}
   },
   {
     "name": "Diablo",
@@ -735,18 +672,16 @@
     "respawn_min_hours": 24,
     "respawn_max_hours": 36,
     "special_conditions": "Use energy sources around the arena to protect from debuffs. The Brain of Argus remains safe until Argus is killed; kill the Brain for loot.",
-    "stats": {
-      "Max HP": 3020544,
-      "A.R.": 66,
-      "ATK": 7032,
-      "D.R.": 66,
-      "DEF": 251,
-      "Fire RES": 60,
-      "Ice RES": 60,
-      "Lightning RES": 60,
-      "Mental RES": 60,
-      "Type": "Lifeless"
-    },
+    "parts": [
+      {
+        "name": "Argus",
+        "stats": { "Max HP": 3020544, "A.R.": 66, "ATK": 7032, "D.R.": 66, "DEF": 251, "Fire RES": 60, "Ice RES": 60, "Lightning RES": 60, "Mental RES": 60, "Type": "Lifeless" }
+      },
+      {
+        "name": "Argus Brain",
+        "stats": { "Max HP": 15843400, "A.R.": 66, "ATK": 10800, "D.R.": 66, "DEF": 255, "Fire RES": 60, "Ice RES": 60, "Lightning RES": 60, "Mental RES": 60, "Type": "Demon" }
+      }
+    ],
     "drops": [
       "Enchant Chips Lv. 100",
       "Level 84 elite equipment",
@@ -764,44 +699,8 @@
     "respawn_notes": [
       "Spawns 24-36 hours after death",
       "Server restart does not affect respawn"
-    ]
-  },
-  {
-    "name": "Argus Brain",
-    "location": "Cabeza de Gigante",
-    "respawn_min_hours": 24,
-    "respawn_max_hours": 36,
-    "special_conditions": "Appears with Argus encounter; remains safe until Argus is killed. Kill the Brain to get loot.",
-    "stats": {
-      "Max HP": 15843400,
-      "A.R.": 66,
-      "ATK": 10800,
-      "D.R.": 66,
-      "DEF": 255,
-      "Fire RES": 60,
-      "Ice RES": 60,
-      "Lightning RES": 60,
-      "Mental RES": 60,
-      "Type": "Demon"
-    },
-    "drops": [
-      "Enchant Chips Lv. 100",
-      "Level 84 elite equipment",
-      "Level 100 equipment",
-      "Level 92 elite armor recipes",
-      "Le Noir armor",
-      "Elite Le Blanc armor",
-      "Recipe - Will of Argus",
-      "Recipe - Hope of Argus",
-      "Promotion Scroll - Veteran",
-      "Promotion Scroll - Expert",
-      "+5 Impervium: Normal (Weapon)",
-      "+5 Impervium: Veteran (Weapon)"
     ],
-    "respawn_notes": [
-      "Spawns 24-36 hours after death",
-      "Server restart does not affect respawn"
-    ]
+    "stats": {}
   },
   {
     "name": "Undertaker",

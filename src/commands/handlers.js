@@ -1,20 +1,32 @@
 import {
-  getBossByName, listBosses, setKilled, resetBoss, computeWindow,
-  getGuildSettings, upsertGuildSettings, setCommandRole, getCommandRole,
-  upsertUserAlertMinutes
+  getBossByName,
+  listBosses,
+  setKilled,
+  resetBoss,
+  computeWindow,
+  getGuildSettings,
+  upsertGuildSettings,
+  setCommandRole,
+  getCommandRole,
+  upsertUserAlertMinutes,
+  addSubscription,
+  listUserSubscriptions
 } from '../db.js';
 
 import {
-  addSubscription, listUserSubscriptions
-} from '../db.js';
-
-import {
-  nowUtc, parseServerHHmmToUtcToday, fmtUtc, toUnixSeconds
+  nowUtc,
+  parseServerHHmmToUtcToday,
+  fmtUtc,
+  toUnixSeconds
 } from '../utils/time.js';
 
 import { EmbedBuilder, PermissionFlagsBits } from 'discord.js';
 
-function titleCase(s){ return s?.trim().replace(/\s+/g, ' ').replace(/\b\w/g, m=>m.toUpperCase()) || ''; }
+// ---------- helpers ----------
+
+function titleCase(s) {
+  return s?.trim().replace(/\s+/g, ' ').replace(/\b\w/g, m => m.toUpperCase()) || '';
+}
 
 function ensureBossExists(bossName) {
   const boss = getBossByName(bossName);
@@ -43,7 +55,46 @@ function isAdminAllowed(interaction) {
   return interaction.member.permissions.has(PermissionFlagsBits.ManageGuild);
 }
 
-// ---------- New: /listbosses ----------
+// Formatting helpers
+const NBSP_TILDE = '\u00A0~\u00A0'; // keeps Start~End on one line (reduces wrapping)
+
+function formatRespawnPattern(min, max) {
+  const nMin = Number(min);
+  const nMax = Number(max);
+  if (!Number.isNaN(nMin) && !Number.isNaN(nMax) && nMin === nMax) {
+    return `${nMin} hours after death`;
+  }
+  return `${min}–${max} hours after death`;
+}
+
+function renderWindowFields(boss, window) {
+  // min==max → single time; else Start~End (with non-breaking spaces around ~)
+  const min = Number(boss.respawn_min_hours);
+  const max = Number(boss.respawn_max_hours);
+  const startUnix = toUnixSeconds(window.start);
+  const endUnix   = toUnixSeconds(window.end);
+
+  if (!Number.isNaN(min) && !Number.isNaN(max) && min === max) {
+    return {
+      name: 'Respawn Time',
+      value: [
+        `**Your Time:** <t:${startUnix}:f>`,
+        `**Server Time (UTC):** ${fmtUtc(window.start)}`
+      ].join('\n')
+    };
+  }
+  return {
+    name: 'Respawn Window',
+    value: [
+      `**Your Time:** <t:${startUnix}:f>${NBSP_TILDE}<t:${endUnix}:f>`,
+      `**Server Time (UTC):** ${fmtUtc(window.start)} ~ ${fmtUtc(window.end)}`
+    ].join('\n')
+  };
+}
+
+// ---------- commands ----------
+
+// /listbosses
 export async function handleListBosses(interaction) {
   const names = listBosses();
   const embed = new EmbedBuilder()
@@ -53,7 +104,7 @@ export async function handleListBosses(interaction) {
   return interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
-// ---------- New: /subscribe <boss> ----------
+// /subscribe <boss>
 export async function handleSubscribe(interaction) {
   if (!isAllowedForStandard(interaction, 'subscribe')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /subscribe.' });
@@ -76,6 +127,7 @@ export async function handleSubscribe(interaction) {
   return interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
+// /killed
 export async function handleKilled(interaction) {
   if (!isAllowedForStandard(interaction, 'killed')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /killed.' });
@@ -97,56 +149,39 @@ export async function handleKilled(interaction) {
     deathUtc = parsed > nowUtc() ? parsed.minus({ days: 1 }) : parsed;
   }
 
-  const ok = setKilled(boss.name, deathUtc.toISO());
-  if (!ok) return interaction.reply({ ephemeral: true, content: 'Failed to record kill. (DB)' });
-
-  // Compute the new window using the updated DB row
-  const updated = getBossByName(boss.name);
-  const window = computeWindow(updated);
-  if (!window) {
-    // Fallback: just show the death time if for some reason window couldn't compute
-    const deathUnix = toUnixSeconds(deathUtc);
-    const embed = new EmbedBuilder()
-      .setTitle(`Recorded Kill: ${boss.name}`)
-      .addFields({
-        name: 'Last Death',
-        value: [
-          `**Your Time:** <t:${deathUnix}:F>`,
-          `**Server Time (UTC):** ${fmtUtc(deathUtc)}`
-        ].join('\n')
-      })
-      .setColor(0x00B894);
-    return interaction.reply({ embeds: [embed] });
+  if (!setKilled(boss.name, deathUtc.toISO())) {
+    return interaction.reply({ ephemeral: true, content: 'Failed to record kill. (DB)' });
   }
 
-  const killedUnix = toUnixSeconds(window.killed);
-  const startUnix  = toUnixSeconds(window.start);
-  const endUnix    = toUnixSeconds(window.end);
+  const updated = getBossByName(boss.name);
+  const window = computeWindow(updated);
+  const killedUnix = toUnixSeconds(deathUtc);
+
+  const fields = [
+    {
+      name: 'Last Death',
+      value: [
+        `**Your Time:** <t:${killedUnix}:f>`,
+        `**Server Time (UTC):** ${fmtUtc(deathUtc)}`
+      ].join('\n')
+    }
+  ];
+
+  if (window) fields.push(renderWindowFields(updated, window));
+  if (Array.isArray(updated.parts) && updated.parts.length) {
+    fields.push({ name: 'Boss Parts', value: updated.parts.map(p => `• ${p.name}`).join('\n') });
+  }
 
   const embed = new EmbedBuilder()
-    .setTitle(`Recorded Kill: ${boss.name}`)
-    .addFields(
-      {
-        name: 'Last Death',
-        value: [
-          `**Your Time:** <t:${killedUnix}:F>`,
-          `**Server Time (UTC):** ${fmtUtc(window.killed)}`
-        ].join('\n')
-      },
-      {
-        name: 'Respawn Window',
-        value: [
-          `**Your Time:** <t:${startUnix}:F> ~ <t:${endUnix}:F>`,
-          `**Server Time (UTC):** ${fmtUtc(window.start)} ~ ${fmtUtc(window.end)}`
-        ].join('\n')
-      }
-    )
+    .setTitle(`Recorded Kill: ${updated.name}`)
+    .addFields(fields)
     .setFooter({ text: 'Server time is UTC. Local times are rendered by Discord.' })
     .setColor(0x00B894);
 
   return interaction.reply({ embeds: [embed] });
 }
 
+// /status
 export async function handleStatus(interaction) {
   if (!isAllowedForStandard(interaction, 'status')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /status.' });
@@ -158,12 +193,18 @@ export async function handleStatus(interaction) {
   const boss = check.boss;
 
   if (!boss.last_killed_at_utc) {
+    const partsField = (boss.parts?.length)
+      ? [{ name: 'Boss Parts', value: boss.parts.map(p => `• ${p.name}`).join('\n') }]
+      : [];
     return interaction.reply({
       embeds: [
         new EmbedBuilder()
           .setTitle(`${boss.name} Status`)
-          .setDescription('Last kill time: **Unknown**\nRespawn window: **Unknown**')
-          .addFields({ name: 'Respawn Pattern', value: `${boss.respawn_min_hours}–${boss.respawn_max_hours} hours after death` })
+          .setDescription('Last kill time: **Unknown**\nRespawn: **Unknown**')
+          .addFields(
+            { name: 'Respawn Pattern', value: formatRespawnPattern(boss.respawn_min_hours, boss.respawn_max_hours) },
+            ...partsField
+          )
           .setColor(0xD63031)
       ]
     });
@@ -171,37 +212,31 @@ export async function handleStatus(interaction) {
 
   const window = computeWindow(boss);
   const killedUnix = toUnixSeconds(window.killed);
-  const startUnix  = toUnixSeconds(window.start);
-  const endUnix    = toUnixSeconds(window.end);
 
-  // Non-breaking space around the tilde prevents line breaks there
-  const NBSP_TILDE = '\u00A0~\u00A0';
+  const fields = [
+    {
+      name: 'Last Death',
+      value: [
+        `**Your Time:** <t:${killedUnix}:f>`,
+        `**Server Time (UTC):** ${fmtUtc(window.killed)}`
+      ].join('\n')
+    },
+    renderWindowFields(boss, window)
+  ];
+  if (Array.isArray(boss.parts) && boss.parts.length) {
+    fields.push({ name: 'Boss Parts', value: boss.parts.map(p => `• ${p.name}`).join('\n') });
+  }
 
   const embed = new EmbedBuilder()
     .setTitle(`${boss.name} Status`)
-    .addFields(
-      {
-        name: 'Last Death',
-        value: [
-          `**Your Time:** <t:${killedUnix}:f>`,                 // was :F → now :f (shorter)
-          `**Server Time (UTC):** ${fmtUtc(window.killed)}`
-        ].join('\n')
-      },
-      {
-        name: 'Respawn Window',
-        value: [
-          // tighten around the tilde to reduce wrap points
-          `**Your Time:** <t:${startUnix}:f>${NBSP_TILDE}<t:${endUnix}:f>`,
-          `**Server Time (UTC):** ${fmtUtc(window.start)} ~ ${fmtUtc(window.end)}`
-        ].join('\n')
-      }
-    )
+    .addFields(fields)
     .setFooter({ text: 'Server time is UTC. Local times are rendered by Discord.' })
     .setColor(0x0984E3);
 
   return interaction.reply({ embeds: [embed] });
 }
 
+// /details
 export async function handleDetails(interaction) {
   if (!isAllowedForStandard(interaction, 'details')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /details.' });
@@ -212,25 +247,40 @@ export async function handleDetails(interaction) {
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
   const b = check.boss;
 
-  const statsLines = Object.entries(b.stats || {}).map(([k, v]) => `**${k}**: ${v}`).join('\n') || '-';
-  const notes = (b.respawn_notes || []).map(n => `• ${n}`).join('\n') || '-';
+  const fields = [
+    { name: 'Location', value: b.location || 'Unknown', inline: true },
+    { name: 'Respawn Pattern', value: formatRespawnPattern(b.respawn_min_hours, b.respawn_max_hours), inline: true },
+    { name: 'Special Conditions', value: b.special_conditions || 'None' }
+  ];
+
+  if (Array.isArray(b.parts) && b.parts.length) {
+    for (const part of b.parts) {
+      const statsLines = Object.entries(part.stats || {}).map(([k, v]) => `**${k}**: ${v}`).join('\n') || '-';
+      fields.push({ name: `Stats — ${part.name}`, value: statsLines });
+    }
+  } else {
+    const statsLines = Object.entries(b.stats || {}).map(([k, v]) => `**${k}**: ${v}`).join('\n') || '-';
+    fields.push({ name: 'Stats', value: statsLines });
+  }
+
+  if ((b.drops || []).length) {
+    fields.push({ name: 'Drops', value: (b.drops || []).map(d => `• ${d}`).join('\n') });
+  }
+  if ((b.respawn_notes || []).length) {
+    fields.push({ name: 'Notes', value: (b.respawn_notes || []).map(n => `• ${n}`).join('\n') });
+  }
 
   return interaction.reply({
     embeds: [
       new EmbedBuilder()
         .setTitle(`${b.name} - Details`)
-        .addFields(
-          { name: 'Location', value: b.location || 'Unknown', inline: true },
-          { name: 'Respawn Pattern', value: `${b.respawn_min_hours}–${b.respawn_max_hours} hours after death`, inline: true },
-          { name: 'Special Conditions', value: b.special_conditions || 'None' },
-          { name: 'Stats', value: statsLines },
-          { name: 'Notes', value: notes }
-        )
+        .addFields(fields)
         .setColor(0x6C5CE7)
     ]
   });
 }
 
+// /drops
 export async function handleDrops(interaction) {
   if (!isAllowedForStandard(interaction, 'drops')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /drops.' });
@@ -251,6 +301,7 @@ export async function handleDrops(interaction) {
   });
 }
 
+// /reset
 export async function handleReset(interaction) {
   if (!isAdminAllowed(interaction)) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /reset.' });
@@ -272,6 +323,7 @@ export async function handleReset(interaction) {
   });
 }
 
+// /setup
 export async function handleSetup(interaction) {
   if (!isAdminAllowed(interaction)) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /setup.' });
@@ -301,6 +353,7 @@ export async function handleSetup(interaction) {
   });
 }
 
+// /setcommandrole
 export async function handleSetCommandRole(interaction) {
   if (!isAdminAllowed(interaction)) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /setcommandrole.' });

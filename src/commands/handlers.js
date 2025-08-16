@@ -99,23 +99,26 @@ export function buildUpcomingEmbed(hours) {
   const rows = getAllBossRows();
   const now = nowUtc();
   const horizon = now.plus({ hours });
-  const candidates = [];
+
+  // Collect ONLY bosses whose window START is within the next N hours
+  const within = [];
   for (const b of rows) {
     if (!b.last_killed_at_utc) continue;
     const w = computeWindow(b);
-    if (!w || w.end <= now) continue;
-    candidates.push({ boss: b, window: w });
+    if (!w) continue;
+    if (w.end <= now) continue;            // skip already closed windows
+    if (w.start > horizon) continue;       // starts after the horizon → exclude
+    within.push({ boss: b, window: w });
   }
-  candidates.sort((a, b) => {
-    const aStart = a.window.start < now ? now : a.window.start;
-    const bStart = b.window.start < now ? now : b.window.start;
-    return aStart.toMillis() - bStart.toMillis();
-  });
-  const within = candidates.filter(c => c.window.start <= horizon);
-  const top3 = candidates.slice(0, 3);
-  const pick = within.length > top3.length ? within : top3;
 
-  const fields = pick.length ? pick.map(({ boss, window }) => {
+  // Sort by the next relevant time (already-open windows count as "now")
+  within.sort((a, b) => {
+    const aKey = (a.window.start < now ? now : a.window.start).toMillis();
+    const bKey = (b.window.start < now ? now : b.window.start).toMillis();
+    return aKey - bKey;
+  });
+
+  const fields = within.length ? within.map(({ boss, window }) => {
     const min = Number(boss.respawn_min_hours);
     const max = Number(boss.respawn_max_hours);
     const single = (!Number.isNaN(min) && !Number.isNaN(max) && min === max);
@@ -131,8 +134,9 @@ export function buildUpcomingEmbed(hours) {
           `**Your Time:** <t:${startUnix}:f>${NBSP_TILDE}<t:${endUnix}:f>`,
           `**Server Time (UTC):** ${fmtUtc(window.start)} ~ ${fmtUtc(window.end)}`
         ].join('\n');
+
     return { name: boss.name, value };
-  }) : [{ name: 'No tracked windows', value: 'Use /killed to start a timer.' }];
+  }) : [{ name: 'No upcoming windows', value: `Nothing starts within the next ${hours} hour(s).` }];
 
   return new EmbedBuilder()
     .setTitle(`Upcoming Spawns - next ${hours}h`)

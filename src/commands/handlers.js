@@ -204,47 +204,84 @@ export async function handleStatus(interaction) {
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
   const boss = check.boss;
 
+  // Helper to decide label based on min/max
+  const min = Number(boss.respawn_min_hours);
+  const max = Number(boss.respawn_max_hours);
+  const showSingle = (!Number.isNaN(min) && !Number.isNaN(max) && min === max);
+  const windowLabel = showSingle ? 'Respawn Time' : 'Respawn Window';
+
+  // Unknown state: keep ONLY the two sections
   if (!boss.last_killed_at_utc) {
-    const partsField = (boss.parts?.length)
-      ? [{ name: 'Boss Parts', value: boss.parts.map(p => `• ${p.name}`).join('\n') }]
-      : [];
-    return interaction.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setTitle(`${boss.name} Status`)
-          .setDescription('Last kill time: **Unknown**\nRespawn: **Unknown**')
-          .addFields(
-            { name: 'Respawn Pattern', value: formatRespawnPattern(boss.respawn_min_hours, boss.respawn_max_hours) },
-            ...partsField,
-            dropsField(boss)
-          )
-          .setColor(0xD63031)
-      ]
-    });
+    const embed = new EmbedBuilder()
+      .setTitle(`${boss.name} Status`)
+      .addFields(
+        {
+          name: 'Last Death',
+          value: [
+            `**Your Time:** Unknown`,
+            `**Server Time (UTC):** Unknown`
+          ].join('\n')
+        },
+        showSingle
+          ? {
+              name: windowLabel,
+              value: [
+                `**Your Time:** Unknown`,
+                `**Server Time (UTC):** Unknown`
+              ].join('\n')
+            }
+          : {
+              name: windowLabel,
+              value: [
+                `**Your Time:** Unknown`,
+                `**Server Time (UTC):** Unknown`
+              ].join('\n')
+            }
+      )
+      .setColor(0xD63031);
+
+    return interaction.reply({ embeds: [embed] });
   }
 
+  // Known state
   const window = computeWindow(boss);
   const killedUnix = toUnixSeconds(window.killed);
 
-  const fields = [
-    {
-      name: 'Last Death',
+  // Use :f to match “August 16, 2025 1:30 AM” style
+  const lastDeathField = {
+    name: 'Last Death',
+    value: [
+      `**Your Time:** <t:${killedUnix}:f>`,
+      `**Server Time (UTC):** ${fmtUtc(window.killed)}`
+    ].join('\n')
+  };
+
+  let windowField;
+  if (showSingle) {
+    const startUnix = toUnixSeconds(window.start);
+    windowField = {
+      name: 'Respawn Time',
       value: [
-        `**Your Time:** <t:${killedUnix}:f>`,
-        `**Server Time (UTC):** ${fmtUtc(window.killed)}`
+        `**Your Time:** <t:${startUnix}:f>`,
+        `**Server Time (UTC):** ${fmtUtc(window.start)}`
       ].join('\n')
-    },
-    renderWindowFields(boss, window)
-  ];
-  if (Array.isArray(boss.parts) && boss.parts.length) {
-    fields.push({ name: 'Boss Parts', value: boss.parts.map(p => `• ${p.name}`).join('\n') });
+    };
+  } else {
+    const NBSP_TILDE = '\u00A0~\u00A0'; // keep the two times together
+    const startUnix = toUnixSeconds(window.start);
+    const endUnix   = toUnixSeconds(window.end);
+    windowField = {
+      name: 'Respawn Window',
+      value: [
+        `**Your Time:** <t:${startUnix}:f>${NBSP_TILDE}<t:${endUnix}:f>`,
+        `**Server Time (UTC):** ${fmtUtc(window.start)} ~ ${fmtUtc(window.end)}`
+      ].join('\n')
+    };
   }
-  fields.push(dropsField(boss));
 
   const embed = new EmbedBuilder()
     .setTitle(`${boss.name} Status`)
-    .addFields(fields)
-    .setFooter({ text: 'Server time is UTC. Local times are rendered by Discord.' })
+    .addFields(lastDeathField, windowField)
     .setColor(0x0984E3);
 
   return interaction.reply({ embeds: [embed] });

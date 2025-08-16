@@ -72,6 +72,15 @@ commands.push(
     .setDMPermission(false)
 );
 
+// /unsubscribe
+commands.push(
+  new SlashCommandBuilder()
+    .setName('unsubscribe')
+    .setDescription('Unsubscribe from DM alerts for a boss')
+    .addStringOption(bossOption)
+    .setDMPermission(false)
+);
+
 // /reset
 commands.push(
   new SlashCommandBuilder()
@@ -115,7 +124,7 @@ commands.push(
 
 // /setcommandrole
 const gateableCommands = [
-  'status', 'details', 'drops', 'killed', 'subscribe', 'reset'
+  'status', 'details', 'drops', 'killed', 'subscribe', 'unsubscribe', 'reset'
 ];
 
 commands.push(

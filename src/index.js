@@ -10,6 +10,7 @@ import {
 import {
   handleListBosses,
   handleSubscribe,
+  handleUnsubscribe,
   handleKilled,
   handleStatus,
   handleDetails,
@@ -74,6 +75,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       case 'subscribe':
         await handleSubscribe(interaction);
+        break;
+
+      case 'unsubscribe':
+        await handleUnsubscribe(interaction);
         break;
 
       case 'killed':

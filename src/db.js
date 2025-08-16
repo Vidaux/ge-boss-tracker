@@ -266,4 +266,13 @@ export function isUserSubscribedTo(userId, guildId, bossName) {
   return !!row;
 }
 
+// Remove a subscription for a specific boss
+export function removeSubscription(userId, guildId, bossName) {
+  const info = db.prepare(`
+    DELETE FROM user_subscriptions
+     WHERE user_id = ? AND guild_id = ? AND boss_name = ?
+  `).run(userId, guildId, bossName);
+  return info.changes > 0;
+}
+
 export default db;

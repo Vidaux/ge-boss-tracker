@@ -10,7 +10,8 @@ import {
   getCommandRole,
   upsertUserAlertMinutes,
   addSubscription,
-  listUserSubscriptions
+  listUserSubscriptions,
+  removeSubscription
 } from '../db.js';
 
 import {
@@ -131,6 +132,36 @@ export async function handleSubscribe(interaction) {
     .setDescription(`You will receive alerts for **${boss.name}** when you have a /setalert configured.`)
     .addFields({ name: 'Your Subscriptions', value: desc })
     .setColor(0x1ABC9C);
+
+  return interaction.reply({ embeds: [embed], ephemeral: true });
+}
+
+// /unsubscribe <boss>
+export async function handleUnsubscribe(interaction) {
+  if (!isAllowedForStandard(interaction, 'unsubscribe')) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /unsubscribe.' });
+  }
+  const bossName = titleCase(interaction.options.getString('boss', true));
+  const check = ensureBossExists(bossName);
+  if (check.error) {
+    return interaction.reply({ ephemeral: true, content: check.error });
+  }
+  const boss = check.boss;
+
+  const removed = removeSubscription(interaction.user.id, interaction.guildId, boss.name);
+
+  const current = listUserSubscriptions(interaction.user.id, interaction.guildId);
+  const desc = current.length ? current.map(b => `• ${b}`).join('\n') : 'None';
+
+  const embed = new EmbedBuilder()
+    .setTitle(removed ? 'Unsubscribed from Boss' : 'Not Subscribed')
+    .setDescription(
+      removed
+        ? `You will no longer receive alerts for **${boss.name}**.`
+        : `You were not subscribed to **${boss.name}**.`
+    )
+    .addFields({ name: 'Your Subscriptions', value: desc })
+    .setColor(removed ? 0xE17055 : 0x95A5A6);
 
   return interaction.reply({ embeds: [embed], ephemeral: true });
 }

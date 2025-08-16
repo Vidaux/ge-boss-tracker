@@ -1,98 +1,181 @@
+// registerCommands.js
 import 'dotenv/config';
-import { REST, Routes, SlashCommandBuilder } from 'discord.js';
+import { REST, Routes, SlashCommandBuilder, ChannelType } from 'discord.js';
 
-const commands = [
-  new SlashCommandBuilder()
-    .setName('killed')
-    .setDescription('Record a boss kill (server time in UTC; optional HH:MM)')
-    .addStringOption(o =>
-      o.setName('boss').setDescription('Boss name').setRequired(true))
-    .addStringOption(o =>
-      o.setName('server_time_hhmm').setDescription('UTC HH:MM (optional)').setRequired(false)),
+const {
+  DISCORD_TOKEN,
+  DISCORD_CLIENT_ID,
+  TEST_GUILD_ID
+} = process.env;
 
+if (!DISCORD_TOKEN || !DISCORD_CLIENT_ID) {
+  console.error('Missing DISCORD_TOKEN or DISCORD_CLIENT_ID in .env');
+  process.exit(1);
+}
+
+// Common boss option with autocomplete enabled
+const bossOption = (opt) =>
+  opt.setName('boss')
+     .setDescription('Boss name')
+     .setRequired(true)
+     .setAutocomplete(true);
+
+const commands = [];
+
+// /status
+commands.push(
   new SlashCommandBuilder()
     .setName('status')
-    .setDescription('Show respawn window for a boss')
-    .addStringOption(o =>
-      o.setName('boss').setDescription('Boss name').setRequired(true)),
+    .setDescription('Show status for a boss (last death & respawn)')
+    .addStringOption(bossOption)
+    .setDMPermission(false)
+);
 
+// /details
+commands.push(
   new SlashCommandBuilder()
     .setName('details')
-    .setDescription('Boss location & stats')
-    .addStringOption(o =>
-      o.setName('boss').setDescription('Boss name').setRequired(true)),
+    .setDescription('Show location, special conditions, and stats for a boss')
+    .addStringOption(bossOption)
+    .setDMPermission(false)
+);
 
+// /drops
+commands.push(
   new SlashCommandBuilder()
     .setName('drops')
-    .setDescription('Boss drop list')
+    .setDescription('Show possible drops for a boss')
+    .addStringOption(bossOption)
+    .setDMPermission(false)
+);
+
+// /killed
+commands.push(
+  new SlashCommandBuilder()
+    .setName('killed')
+    .setDescription('Record a boss kill (server time is UTC)')
+    .addStringOption(bossOption)
     .addStringOption(o =>
-      o.setName('boss').setDescription('Boss name').setRequired(true)),
+      o.setName('server_time_hhmm')
+       .setDescription('UTC time in HH:MM (24h), e.g., 21:22')
+       .setRequired(false)
+    )
+    .setDMPermission(false)
+);
 
-  new SlashCommandBuilder()
-    .setName('reset')
-    .setDescription('Reset boss timer to Unknown (admin)')
-    .addStringOption(o =>
-      o.setName('boss').setDescription('Boss name').setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName('setup')
-    .setDescription('Configure alerts channel and roles (admin)')
-    .addChannelOption(o =>
-      o.setName('alert_channel').setDescription('Channel for spawn alerts').setRequired(false))
-    .addRoleOption(o =>
-      o.setName('admin_role').setDescription('Admin role for /reset and /setup').setRequired(false))
-    .addRoleOption(o =>
-      o.setName('standard_role').setDescription('Role required for standard commands').setRequired(false)),
-
-  new SlashCommandBuilder()
-    .setName('setcommandrole')
-    .setDescription('Gate a specific command behind a role (admin)')
-    .addStringOption(o =>
-      o.setName('command').setDescription('Command name (killed/status/details/drops/subscribe)').setRequired(true)
-        .addChoices(
-          { name: 'killed', value: 'killed' },
-          { name: 'status', value: 'status' },
-          { name: 'details', value: 'details' },
-          { name: 'drops', value: 'drops' },
-          { name: 'subscribe', value: 'subscribe' }
-        ))
-    .addRoleOption(o =>
-      o.setName('role').setDescription('Role required to use the command').setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName('setalert')
-    .setDescription('Set how many minutes before window you want a DM alert')
-    .addIntegerOption(o =>
-      o.setName('minutes').setDescription('Minutes (1-1440)').setRequired(true)),
-
-  // NEW: listbosses
-  new SlashCommandBuilder()
-    .setName('listbosses')
-    .setDescription('List all known bosses'),
-
-  // NEW: subscribe
+// /subscribe
+commands.push(
   new SlashCommandBuilder()
     .setName('subscribe')
-    .setDescription('Subscribe to alerts for a specific boss')
-    .addStringOption(o =>
-      o.setName('boss').setDescription('Boss name').setRequired(true))
-].map(c => c.toJSON());
+    .setDescription('Subscribe to DM alerts for a boss (requires /setalert)')
+    .addStringOption(bossOption)
+    .setDMPermission(false)
+);
 
-const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+// /reset
+commands.push(
+  new SlashCommandBuilder()
+    .setName('reset')
+    .setDescription('Admin: clear the respawn timer for a boss')
+    .addStringOption(bossOption)
+    .setDMPermission(false)
+);
 
-async function main() {
-  if (process.env.TEST_GUILD_ID) {
-    await rest.put(
-      Routes.applicationGuildCommands(process.env.DISCORD_CLIENT_ID, process.env.TEST_GUILD_ID),
-      { body: commands }
-    );
-    console.log('Registered commands to TEST guild.');
-  } else {
-    await rest.put(
-      Routes.applicationCommands(process.env.DISCORD_CLIENT_ID),
-      { body: commands }
-    );
-    console.log('Registered GLOBAL commands.');
+// /listbosses
+commands.push(
+  new SlashCommandBuilder()
+    .setName('listbosses')
+    .setDescription('List all known bosses')
+    .setDMPermission(false)
+);
+
+// /setup
+commands.push(
+  new SlashCommandBuilder()
+    .setName('setup')
+    .setDescription('Admin: configure alert channel and roles')
+    .addChannelOption(o =>
+      o.setName('alert_channel')
+       .setDescription('Channel for spawn window alerts')
+       .addChannelTypes(ChannelType.GuildText)
+       .setRequired(false)
+    )
+    .addRoleOption(o =>
+      o.setName('admin_role')
+       .setDescription('Role allowed to use admin commands')
+       .setRequired(false)
+    )
+    .addRoleOption(o =>
+      o.setName('standard_role')
+       .setDescription('Role required for standard commands (if set)')
+       .setRequired(false)
+    )
+    .setDMPermission(false)
+);
+
+// /setcommandrole
+const gateableCommands = [
+  'status', 'details', 'drops', 'killed', 'subscribe', 'reset'
+];
+
+commands.push(
+  new SlashCommandBuilder()
+    .setName('setcommandrole')
+    .setDescription('Admin: gate a command behind a specific role')
+    .addStringOption(o => {
+      o.setName('command')
+       .setDescription('Command to gate')
+       .setRequired(true);
+      gateableCommands.forEach(c => o.addChoices({ name: `/${c}`, value: c }));
+      return o;
+    })
+    .addRoleOption(o =>
+      o.setName('role')
+       .setDescription('Role required to use the command')
+       .setRequired(true)
+    )
+    .setDMPermission(false)
+);
+
+// /setalert
+commands.push(
+  new SlashCommandBuilder()
+    .setName('setalert')
+    .setDescription('Set how many minutes before window start you want a DM')
+    .addIntegerOption(o =>
+      o.setName('minutes')
+       .setDescription('1–1440 minutes')
+       .setMinValue(1)
+       .setMaxValue(1440)
+       .setRequired(true)
+    )
+    .setDMPermission(false)
+);
+
+const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
+
+async function register() {
+  try {
+    const body = commands.map(c => c.toJSON());
+    if (TEST_GUILD_ID) {
+      console.log('Registering GUILD commands to', TEST_GUILD_ID);
+      await rest.put(
+        Routes.applicationGuildCommands(DISCORD_CLIENT_ID, TEST_GUILD_ID),
+        { body }
+      );
+      console.log('Guild commands registered.');
+    } else {
+      console.log('Registering GLOBAL commands...');
+      await rest.put(
+        Routes.applicationCommands(DISCORD_CLIENT_ID),
+        { body }
+      );
+      console.log('Global commands registered.');
+    }
+  } catch (err) {
+    console.error('Failed to register commands:', err);
+    process.exit(1);
   }
 }
-main().catch(console.error);
+
+register();

@@ -40,6 +40,7 @@ import {
 } from './db.js';
 
 import { nowUtc, fmtUtc, toUnixSeconds } from './utils/time.js';
+import { bus } from './bus.js'; // <-- NEW: event bus
 
 const { DISCORD_TOKEN } = process.env;
 
@@ -184,7 +185,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       });
 
       // OPTIONAL: auto-dismiss the confirmation after a short delay.
-      // Comment out this block if you prefer to keep the confirmation visible.
       setTimeout(() => {
         interaction.deleteReply().catch(() => {});
       }, 3000);
@@ -245,8 +245,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 // --------- Scheduler: update dashboard + ping role ----------
-async function tickOnce() {
-  const guilds = getAllGuildSettings();
+async function tickOnce(onlyGuildId = null) {
+  const guilds = onlyGuildId
+    ? [getGuildSettings(onlyGuildId)].filter(Boolean)
+    : getAllGuildSettings();
+
   const now = nowUtc();
 
   for (const gs of guilds) {
@@ -270,7 +273,9 @@ async function tickOnce() {
           const newMsg = await channel.send({ embeds: [embed] });
           upsertGuildSettings(gs.guild_id, { alert_message_id: newMsg.id });
         }
-      } catch { /* ignore per-guild errors */ }
+      } catch {
+        /* ignore per-guild errors */
+      }
     }
 
     // 2) Ping role if a window is approaching
@@ -307,14 +312,23 @@ async function tickOnce() {
               ]
             });
             markChannelPinged(gs.guild_id, b.name, windowKey);
-          } catch { /* ignore send errors */ }
+          } catch {
+            /* ignore send errors */
+          }
         }
       }
     }
   }
 }
 
+// Regular tick (every minute)
 setInterval(() => { tickOnce().catch(() => {}); }, 60 * 1000);
+
+// Immediate per-guild refresh when handlers ask for it
+bus.on('forceUpdate', (payload) => {
+  const gid = payload?.guildId ?? null;
+  tickOnce(gid).catch(() => {});
+});
 
 process.on('unhandledRejection', (err) => {
   console.error('UNHANDLED REJECTION:', err);

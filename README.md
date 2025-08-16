@@ -1,6 +1,6 @@
 # GE Boss Tracker
 
-Tracks **Granado Espada** boss respawn windows. Uses **UTC internally** and Discord **timestamp formatting** so each user sees the correct local time automatically. Includes a live **Upcoming Spawns dashboard** in a channel and optional **role pings** before windows open.
+Tracks **Granado Espada** boss respawn windows. Uses **UTC internally** and Discord **timestamp formatting** so each user sees the correct local time automatically. Includes a live **Upcoming Spawns dashboard** and optional **role pings** before windows open.
 
 > Built with **Node 20+**, **discord.js v14**, **SQLite**.
 
@@ -8,35 +8,36 @@ Tracks **Granado Espada** boss respawn windows. Uses **UTC internally** and Disc
 
 ## Features
 
-- **UTC-based** timers; embeds show both **Server Time (UTC)** and **Your Time** (Discord `<t:…>`).
+- **UTC-based** timers; embeds show both **Server Time (UTC)** and **Your Time** (`<t:...>`).
 - Clean, consistent embeds (no relative times in `/status`, `/killed`, `/upcoming`).
-- **Multi-part bosses** (e.g., *Rafflesia*, *Argus*) treated as **one boss** for timers; parts shown only in `/details`.
+- **Multi-part bosses** (e.g., *Rafflesia*, *Argus*) are tracked as **one boss** (single timer). Parts and their stats appear in `/details`.
 - **Subscriptions & DMs** (opt-in):
   - `/subscribe boss|all` / `/unsubscribe boss|all`
-  - Default **30 min** alert lead time set on a user’s first subscribe; adjustable with `/setalert`.
+  - Default **30 min** alert lead time is set on a user’s first subscribe; adjustable with `/setalert`.
   - `/unsubscribe boss` autocomplete shows **only bosses you’re subscribed to**.
   - `/subscriptions` lists your current subscriptions.
 - **Upcoming dashboard** (auto-updated):
-  - A single message in your chosen channel shows the **next 3** bosses or **all within N hours** (whichever is more).
+  - One message shows the **next 3** bosses or **all within N hours** (whichever is more).
   - Optional **role ping** X minutes before a window opens.
-  - Fully configurable via a **wizard-style `/setup`** with dropdowns & a button.
+  - Configurable via a **wizard-style `/setup`** with dropdowns & a button.
+  - **Instant refresh** whenever `/killed` or `/reset` runs.
 - **Role gating**: `/setcommandrole` can restrict any standard command to a role.
-- Lightweight scheduler (ticks every minute).
+- Lightweight scheduler (ticks every minute; configurable).
 
 ---
 
 ## Commands
 
-### Player-facing
+### Player-Facing
 
 - `/killed <boss> [server_time_hhmm]`  
-  Record a kill in **UTC**. If `server_time_hhmm` is omitted, uses **now** (UTC). If provided as `HH:MM` and that time is still in the future **today** (UTC), it assumes **yesterday**.
+  Record a kill in **UTC**. If time is omitted, uses **now (UTC)**. If provided as `HH:MM` and that time is still in the future **today** (UTC), it assumes **yesterday**.
 
 - `/status <boss>`  
   Shows:
-  - **Last Death** — Your Time / Server Time (UTC)
-  - **Respawn Window** — Your Time(s) / Server Time (UTC)  
-    (If min==max hours, shows a single **Respawn Time**.)
+  - **Last Death** – Your Time / Server Time (UTC)
+  - **Respawn Window** – Your Time(s) / Server Time (UTC)  
+    *(If min==max hours, shows a single **Respawn Time** instead of a window.)*
 
 - `/details <boss>`  
   Location, respawn pattern, special conditions, **stats** (per-part when applicable), optional notes. *(No drops shown here.)*
@@ -48,7 +49,7 @@ Tracks **Granado Espada** boss respawn windows. Uses **UTC internally** and Disc
   Upcoming spawns: shows the **next 3** overall **or** **all** within `hours` (default **3**) — whichever set is larger.
 
 - `/listbosses`  
-  Lists all known bosses (canonical names; boss parts are not listed).
+  Lists all known bosses (canonical names; **boss parts are not listed**).
 
 - `/subscribe boss <boss>` / `/subscribe all`  
   Subscribe to DM alerts (defaults your lead time to **30 min** if you don’t have one yet).
@@ -72,10 +73,11 @@ Tracks **Granado Espada** boss respawn windows. Uses **UTC internally** and Disc
   2) **Ping Role** (optional)
   3) **Dashboard Lookahead Hours**
   4) **Ping Lead Minutes**  
-     Then click **“Create/Update Dashboard Message”** to post or refresh the dashboard.
+     Then click **Create/Update Dashboard Message** to post or refresh the dashboard.  
+     *Dropdown picks save silently (no extra messages); the wizard is dismissed after creating/updating the dashboard.*
 
 - `/reset <boss>`  
-  Clear the timer (Unknown).
+  Clear the timer (sets status to **Unknown**). *(Forces a dashboard refresh.)*
 
 - `/setcommandrole <command> <role>`  
   Gate a command behind a role (otherwise anyone can use it).
@@ -95,7 +97,7 @@ Tracks **Granado Espada** boss respawn windows. Uses **UTC internally** and Disc
 
 - The dashboard message (single message in your alert channel) is **auto-updated every minute** to show upcoming spawns for your configured **lookahead hours**.
 - If a **ping role** and **lead minutes** are set in `/setup`, the bot **@mentions the role** once when a window is within the lead time.
-- Ensure the bot can send messages in the channel and can mention the chosen role (role is “mentionable” or the bot has permission to mention roles).
+- Ensure the bot can send messages in the channel and can mention the chosen role (make role “mentionable” or grant permission).
 
 ---
 
@@ -107,6 +109,7 @@ cd /opt
 git clone <your-repo-url> ge-boss-bot
 cd ge-boss-bot
 npm ci
+
 ```
 2) **Create .env**
 ```bash

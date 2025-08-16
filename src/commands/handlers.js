@@ -36,6 +36,8 @@ import {
   ChannelType
 } from 'discord.js';
 
+import { bus } from '../bus.js';
+
 // ---------- helpers ----------
 function titleCase(s) {
   return s?.trim().replace(/\s+/g, ' ').replace(/\b\w/g, m => m.toUpperCase()) || '';
@@ -138,7 +140,7 @@ export function buildUpcomingEmbed(hours) {
     .setColor(0x00A8FF);
 }
 
-// ---------- commands (existing, trimmed to those affected + setup) ----------
+// ---------- commands ----------
 export async function handleListBosses(interaction) {
   const names = listBosses();
   const embed = new EmbedBuilder()
@@ -170,6 +172,9 @@ export async function handleKilled(interaction) {
   if (!setKilled(boss.name, deathUtc.toISO())) {
     return interaction.reply({ ephemeral: true, content: 'Failed to record kill. (DB)' });
   }
+
+  // Force an immediate dashboard refresh for this guild
+  bus.emit('forceUpdate', { guildId: interaction.guildId });
 
   const updated = getBossByName(boss.name);
   const window = computeWindow(updated);
@@ -294,6 +299,9 @@ export async function handleReset(interaction) {
   const ok = resetBoss(check.boss.name);
   if (!ok) return interaction.reply({ ephemeral: true, content: 'Failed to reset boss.' });
 
+  // Force an immediate dashboard refresh for this guild
+  bus.emit('forceUpdate', { guildId: interaction.guildId });
+
   return interaction.reply({
     embeds: [ new EmbedBuilder().setTitle(`Reset: ${check.boss.name}`).setDescription('Respawn timer cleared. Status is now **Unknown**.').setColor(0xE17055) ]
   });
@@ -380,7 +388,7 @@ export async function handleSubscriptions(interaction) {
   return interaction.reply({ embeds: [ new EmbedBuilder().setTitle('Your Subscriptions').setDescription(desc).setColor(0x8E44AD) ], ephemeral: true });
 }
 
-// /setalert — set user DM lead time only (1–1440)
+// /setalert - set user DM lead time only (1–1440)
 export async function handleSetAlert(interaction) {
   if (!isAllowedForStandard(interaction, 'setalert')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /setalert.' });
@@ -395,7 +403,7 @@ export async function handleSetAlert(interaction) {
   return interaction.reply({ ephemeral: true, content: `Your alert lead time is now **${minutes} minutes** before window start.` });
 }
 
-// /setcommandrole — gate a command behind a specific role (admin only)
+// /setcommandrole - gate a command behind a specific role (admin only)
 export async function handleSetCommandRole(interaction) {
   if (!isAdminAllowed(interaction)) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /setcommandrole.' });
@@ -412,7 +420,6 @@ export async function handleSetCommandRole(interaction) {
     content: `Set role for **/${commandName}** to ${role}.`
   });
 }
-
 
 // /upcoming - dynamic hours
 export async function handleUpcoming(interaction) {

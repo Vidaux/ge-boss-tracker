@@ -515,15 +515,18 @@ export async function handleSetAlert(interaction) {
   return interaction.reply({ ephemeral: true, content: `DM alert lead time set to **~${minutes} minutes** before a subscribed boss window.` });
 }
 
-// /upcoming — next 3 overall OR everyone starting within 3 hours (whichever set is larger)
+// /upcoming — next 3 overall OR everyone starting within N hours (default 3)
 export async function handleUpcoming(interaction) {
   if (!isAllowedForStandard(interaction, 'upcoming')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /upcoming.' });
   }
 
+  const hoursArg = interaction.options.getInteger('hours', false);
+  const hours = (typeof hoursArg === 'number' ? hoursArg : 3);
   const NBSP_TILDE = '\u00A0~\u00A0';
+
   const now = nowUtc();
-  const horizon = now.plus({ hours: 3 });
+  const horizon = now.plus({ hours });
 
   // Build candidate windows from bosses that have a known last death and a window not yet ended
   const rows = getAllBossRows();
@@ -539,7 +542,7 @@ export async function handleUpcoming(interaction) {
     return interaction.reply({
       embeds: [
         new EmbedBuilder()
-          .setTitle('Upcoming Spawns')
+          .setTitle(`Upcoming Spawns`)
           .setDescription('No upcoming spawn windows are tracked yet.')
           .setColor(0x95A5A6)
       ],
@@ -555,13 +558,13 @@ export async function handleUpcoming(interaction) {
   });
 
   // Group A: all starting by horizon (or already open)
-  const within3h = candidates.filter(c => c.window.start <= horizon);
+  const withinNh = candidates.filter(c => c.window.start <= horizon);
 
   // Group B: top 3 overall
   const top3 = candidates.slice(0, 3);
 
   // Pick whichever set is larger
-  const pick = within3h.length > top3.length ? within3h : top3;
+  const pick = withinNh.length > top3.length ? withinNh : top3;
 
   // Build fields (no relative times; show single time if min==max)
   const fields = pick.map(({ boss, window }) => {
@@ -586,7 +589,7 @@ export async function handleUpcoming(interaction) {
   });
 
   const embed = new EmbedBuilder()
-    .setTitle('Upcoming Spawns')
+    .setTitle(`Upcoming Spawns — next ${hours}h`)
     .addFields(...fields)
     .setColor(0x00A8FF);
 

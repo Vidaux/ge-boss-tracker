@@ -105,11 +105,18 @@ commands.push(
     .setDMPermission(false)
 );
 
-/** /upcoming  */
+/** /upcoming — now dynamic */
 commands.push(
   new SlashCommandBuilder()
     .setName('upcoming')
-    .setDescription('Show upcoming boss spawn windows (next 3, or all within 3 hours - whichever is more)')
+    .setDescription('Upcoming spawns: next 3, or all within N hours (whichever is more)')
+    .addIntegerOption(o =>
+      o.setName('hours')
+       .setDescription('Lookahead window in hours (default 3)')
+       .setMinValue(1)
+       .setMaxValue(168)
+       .setRequired(false)
+    )
     .setDMPermission(false)
 );
 

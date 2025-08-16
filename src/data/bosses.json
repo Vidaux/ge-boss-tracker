@@ -222,7 +222,9 @@
     "respawn_notes": [
       "Spawns 1-1.5 hours after server restart",
       "Spawns 1-1.5 hours after death"
-    ]
+    ],
+    "reset_respawn_min_hours": 1,
+    "reset_respawn_max_hours": 1.5
   },
   {
     "name": "Gerero",
@@ -284,7 +286,9 @@
     "respawn_notes": [
       "Initial spawn on server restart",
       "Spawns 24 hours after death"
-    ]
+    ],
+    "reset_respawn_min_hours": 0,
+    "reset_respawn_max_hours": 0
   },
   {
     "name": "Dream Blade Antelope",
@@ -320,7 +324,9 @@
     "respawn_notes": [
       "Spawns 1-1.5 hours after server restart",
       "Spawns 1-1.5 hours after death"
-    ]
+    ],
+    "reset_respawn_min_hours": 1,
+    "reset_respawn_max_hours": 1.5
   },
   {
     "name": "Gulfaxi",
@@ -471,7 +477,9 @@
     "respawn_notes": [
       "Initial spawn on server restart",
       "Spawns 24~48 hours after death"
-    ]
+    ],
+    "reset_respawn_min_hours": 0,
+    "reset_respawn_max_hours": 0
   },
   {
     "name": "King of Greed",
@@ -505,7 +513,9 @@
     "respawn_notes": [
       "Spawns 3 hours 30 mins ~ 5 hours after server restart",
       "Spawns 3 hours 30 mins ~ 5 hours after death"
-    ]
+    ],
+    "reset_respawn_min_hours": 3.5,
+    "reset_respawn_max_hours": 5
   },
   {
     "name": "Swamp Angler",
@@ -538,7 +548,9 @@
     "respawn_notes": [
       "Spawns 2 hours 15 mins ~ 3 hours 15 mins after server restart",
       "Spawns 2 hours 15 mins ~ 3 hours 15 mins after death"
-    ]
+    ],
+    "reset_respawn_min_hours": 2.25,
+    "reset_respawn_max_hours": 3.25
   },
   {
     "name": "Arctic Merman Eater",
@@ -570,7 +582,9 @@
     "respawn_notes": [
       "Spawns 4-4.5 hours after server restart",
       "Do not respawn until the next server restart"
-    ]
+    ],
+    "reset_respawn_min_hours": 4,
+    "reset_respawn_max_hours": 4.5
   },
   {
     "name": "Swamp Merman Eater",
@@ -602,7 +616,9 @@
     "respawn_notes": [
       "Spawns 4-4.5 hours after server restart",
       "Do not respawn until the next server restart"
-    ]
+    ],
+    "reset_respawn_min_hours": 4,
+    "reset_respawn_max_hours": 4.5
   },
   {
     "name": "Praire Merman Eater",
@@ -634,7 +650,9 @@
     "respawn_notes": [
       "Spawns 4-4.5 hours after server restart",
       "Do not respawn until the next server restart"
-    ]
+    ],
+    "reset_respawn_min_hours": 4,
+    "reset_respawn_max_hours": 4.5
   },
   {
     "name": "Bribantra",
@@ -664,7 +682,9 @@
     "respawn_notes": [
       "Spawns 8 hours after death",
       "Spawns 8 hours after server restart"
-    ]
+    ],
+    "reset_respawn_min_hours": 8,
+    "reset_respawn_max_hours": 8
   },
   {
     "name": "Argus",
@@ -734,6 +754,8 @@
     "respawn_notes": [
       "Spawns 8-9 hours after death",
       "Spawns 8-9 hours after server restart"
-    ]
+    ],
+    "reset_respawn_min_hours": 8,
+    "reset_respawn_max_hours": 9
   }
 ]

@@ -24,6 +24,7 @@ import {
   handleSetup,
   handleSetCommandRole,
   handleSetAlert,
+  handleServerReset,       // NEW
   buildUpcomingEmbed
 } from './commands/handlers.js';
 
@@ -40,11 +41,11 @@ import {
   listRegisteredUsers,
   hasUserBeenAlerted,
   markUserAlerted,
-  listKilledBosses
+  listKilledBosses           // NEW (for autocomplete)
 } from './db.js';
 
 import { nowUtc, fmtUtc, toUnixSeconds } from './utils/time.js';
-import { bus } from './bus.js'; // <-- NEW: event bus
+import { bus } from './bus.js';
 
 const { DISCORD_TOKEN } = process.env;
 
@@ -82,8 +83,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             ? listUserSubscriptions(interaction.user.id, interaction.guildId)
             : listBosses();
         } else if (interaction.commandName === 'reset') {
-          // ONLY bosses that currently have a recorded kill
-          sourceNames = listKilledBosses();
+          sourceNames = listKilledBosses(); // only bosses with a recorded kill
         } else {
           sourceNames = listBosses();
         }
@@ -103,7 +103,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 // --------- Setup wizard component handlers ----------
 client.on(Events.InteractionCreate, async (interaction) => {
-  // Only care about these component types
   if (
     !(
       interaction.isStringSelectMenu() ||
@@ -113,48 +112,43 @@ client.on(Events.InteractionCreate, async (interaction) => {
     )
   ) return;
 
-  // Admin guard for the wizard
   const gs = getGuildSettings(interaction.guildId) || {};
   const isAdmin = gs?.admin_role_id
     ? interaction.member.roles.cache.has(gs.admin_role_id)
     : interaction.member.permissions.has('ManageGuild');
 
   if (!isAdmin) {
-    // Minimal one-off error; no follow-ups afterwards
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use the setup wizard.' });
   }
 
   try {
-    // ----- Silent saves: no extra messages -----
     if (interaction.customId === 'setup:channel' && interaction.isChannelSelectMenu()) {
       const ch = interaction.channels.first();
       upsertGuildSettings(interaction.guildId, { alert_channel_id: ch?.id ?? null });
-      return interaction.deferUpdate(); // no new message
+      return interaction.deferUpdate();
     }
 
     if (interaction.customId === 'setup:role' && interaction.isRoleSelectMenu()) {
       const role = interaction.roles.first();
       upsertGuildSettings(interaction.guildId, { ping_role_id: role?.id ?? null });
-      return interaction.deferUpdate(); // no new message
+      return interaction.deferUpdate();
     }
 
     if (interaction.customId === 'setup:hours' && interaction.isStringSelectMenu()) {
       const hours = parseInt(interaction.values[0], 10);
       upsertGuildSettings(interaction.guildId, { upcoming_hours: hours });
-      return interaction.deferUpdate(); // no new message
+      return interaction.deferUpdate();
     }
 
     if (interaction.customId === 'setup:minutes' && interaction.isStringSelectMenu()) {
       const minutes = parseInt(interaction.values[0], 10);
       upsertGuildSettings(interaction.guildId, { ping_minutes: minutes });
-      return interaction.deferUpdate(); // no new message
+      return interaction.deferUpdate();
     }
 
-    // ----- Create/Update dashboard: show one confirmation, then dismiss wizard -----
     if (interaction.customId === 'setup:make_message' && interaction.isButton()) {
       const settings = getGuildSettings(interaction.guildId) || {};
       if (!settings.alert_channel_id) {
-        // Replace the wizard with a single inline error (no extra messages)
         return interaction.update({
           content: '❗ Select an **Alert Channel** first in the menus above.',
           embeds: [],
@@ -187,14 +181,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
         upsertGuildSettings(interaction.guildId, { alert_message_id: messageId });
       }
 
-      // Replace the wizard with a single confirmation, no extra new messages
       await interaction.update({
         content: '✅ Dashboard message created/updated.',
         embeds: [],
         components: []
       });
 
-      // OPTIONAL: auto-dismiss the confirmation after a short delay.
       setTimeout(() => {
         interaction.deleteReply().catch(() => {});
       }, 3000);
@@ -203,7 +195,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
   } catch (err) {
     console.error('Setup component error:', err);
-    // Only send an error if nothing was acknowledged
     if (!interaction.deferred && !interaction.replied) {
       await interaction.reply({ ephemeral: true, content: 'Error processing selection.' }).catch(() => {});
     }
@@ -238,6 +229,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       case 'details':         await handleDetails(interaction); break;
       case 'drops':           await handleDrops(interaction); break;
       case 'reset':           await handleReset(interaction); break;
+      case 'serverreset':     await handleServerReset(interaction); break; // NEW
       case 'setup':           await handleSetup(interaction); break;
       case 'setcommandrole':  await handleSetCommandRole(interaction); break;
       case 'setalert':        await handleSetAlert(interaction); break;
@@ -265,7 +257,7 @@ async function tickOnce(onlyGuildId = null) {
   for (const gs of guilds) {
     if (!gs.alert_channel_id) continue;
 
-    // 1) Update dashboard message if configured
+    // 1) Update dashboard
     const hours = gs.upcoming_hours ?? 3;
     if (gs.alert_message_id) {
       try {
@@ -279,16 +271,13 @@ async function tickOnce(onlyGuildId = null) {
         if (msg) {
           await msg.edit({ embeds: [embed] });
         } else {
-          // recreate if missing
           const newMsg = await channel.send({ embeds: [embed] });
           upsertGuildSettings(gs.guild_id, { alert_message_id: newMsg.id });
         }
-      } catch {
-        /* ignore per-guild errors */
-      }
+      } catch { /* ignore */ }
     }
 
-    // 2) Ping role if a window is approaching
+    // 2) Role pings near window start
     if (gs.ping_role_id && gs.ping_minutes) {
       const rows = getAllBossRows();
       const channelGuild = await client.guilds.fetch(gs.guild_id).catch(() => null);
@@ -305,7 +294,6 @@ async function tickOnce(onlyGuildId = null) {
         const windowKey = `${b.name}:${b.last_killed_at_utc}`;
         if (hasChannelBeenPinged(gs.guild_id, b.name, windowKey)) continue;
 
-        // If we're between threshold and start → ping
         if (now >= threshold && now < w.start) {
           try {
             await channel.send({
@@ -322,26 +310,21 @@ async function tickOnce(onlyGuildId = null) {
               ]
             });
             markChannelPinged(gs.guild_id, b.name, windowKey);
-          } catch {
-            /* ignore send errors */
-          }
+          } catch { /* ignore */ }
         }
       }
     }
 
-    // 3) DM alerts to subscribed users when their lead time hits
+    // 3) DM alerts for subscribed users
     try {
       const rows = getAllBossRows();
-      const regs = listRegisteredUsers(gs.guild_id); // users with alert_minutes set
-
-      // For DMs we need the Guild name in the embed footer (optional, but helpful)
+      const regs = listRegisteredUsers(gs.guild_id);
       const guildObj = await client.guilds.fetch(gs.guild_id).catch(() => null);
 
       for (const reg of regs) {
         const subs = listUserSubscriptions(reg.user_id, gs.guild_id);
-        if (!subs || subs.length === 0) continue; // opt-in model: no subs, no DMs
+        if (!subs || subs.length === 0) continue;
 
-        // Only consider bosses this user is subscribed to
         for (const b of rows) {
           if (!subs.includes(b.name)) continue;
           if (!b.last_killed_at_utc) continue;
@@ -352,7 +335,6 @@ async function tickOnce(onlyGuildId = null) {
           const windowKey = `${b.name}:${b.last_killed_at_utc}`;
           if (hasUserBeenAlerted(reg.user_id, gs.guild_id, b.name, windowKey)) continue;
 
-          // When the user's alert lead time hits
           const threshold = w.start.minus({ minutes: reg.alert_minutes || 30 });
           if (now >= threshold && now < w.start) {
             try {
@@ -362,10 +344,8 @@ async function tickOnce(onlyGuildId = null) {
               const embed = new EmbedBuilder()
                 .setTitle(`Spawn Approaching - ${b.name}`)
                 .addFields(
-                  { name: 'Window Start',
-                    value: `**Your Time:** <t:${toUnixSeconds(w.start)}:f>\n**Server Time (UTC):** ${fmtUtc(w.start)}` },
-                  { name: 'Window End',
-                    value: `**Your Time:** <t:${toUnixSeconds(w.end)}:f>\n**Server Time (UTC):** ${fmtUtc(w.end)}` }
+                  { name: 'Window Start', value: `**Your Time:** <t:${toUnixSeconds(w.start)}:f>\n**Server Time (UTC):** ${fmtUtc(w.start)}` },
+                  { name: 'Window End', value: `**Your Time:** <t:${toUnixSeconds(w.end)}:f>\n**Server Time (UTC):** ${fmtUtc(w.end)}` }
                 )
                 .setFooter({ text: guildObj ? `Guild: ${guildObj.name}` : 'Boss Alert' })
                 .setColor(0x2ECC71);
@@ -373,21 +353,19 @@ async function tickOnce(onlyGuildId = null) {
               await user.send({ embeds: [embed] }).catch(() => {});
               markUserAlerted(reg.user_id, gs.guild_id, b.name, windowKey);
             } catch {
-              // ignore DM errors (user has DMs off, left the server, etc.)
+              /* ignore DM errors */
             }
           }
         }
       }
     } catch {
-      // ignore per-guild DM errors
+      /* ignore */
     }
   }
 }
 
-// Regular tick (every minute)
 setInterval(() => { tickOnce().catch(() => {}); }, 60 * 1000);
 
-// Immediate per-guild refresh when handlers ask for it
 bus.on('forceUpdate', (payload) => {
   const gid = payload?.guildId ?? null;
   tickOnce(gid).catch(() => {});

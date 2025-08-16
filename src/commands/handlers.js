@@ -14,7 +14,9 @@ import {
   listUserSubscriptions,
   getUserRegistration,
   removeSubscription,
-  getAllBossRows
+  getAllBossRows,
+  applyServerReset,
+  listKilledBosses
 } from '../db.js';
 
 import {
@@ -72,13 +74,24 @@ function formatRespawnPattern(min, max) {
   return `${min}–${max} hours after death`;
 }
 function renderWindowFields(boss, window) {
-  const min = Number(boss.respawn_min_hours);
-  const max = Number(boss.respawn_max_hours);
+  const min = Number(
+    window.trigger === 'reset' && boss.reset_respawn_min_hours != null
+      ? boss.reset_respawn_min_hours
+      : boss.respawn_min_hours
+  );
+  const max = Number(
+    window.trigger === 'reset' && boss.reset_respawn_max_hours != null
+      ? boss.reset_respawn_max_hours
+      : boss.respawn_max_hours
+  );
+
   const startUnix = toUnixSeconds(window.start);
   const endUnix   = toUnixSeconds(window.end);
-  if (!Number.isNaN(min) && !Number.isNaN(max) && min === max) {
+  const usingSingle = !Number.isNaN(min) && !Number.isNaN(max) && min === max;
+
+  if (usingSingle) {
     return {
-      name: 'Respawn Time',
+      name: window.trigger === 'reset' ? 'Respawn Time (after server reset)' : 'Respawn Time',
       value: [
         `**Your Time:** <t:${startUnix}:f>`,
         `**Server Time (UTC):** ${fmtUtc(window.start)}`
@@ -86,7 +99,7 @@ function renderWindowFields(boss, window) {
     };
   }
   return {
-    name: 'Respawn Window',
+    name: window.trigger === 'reset' ? 'Respawn Window (after server reset)' : 'Respawn Window',
     value: [
       `**Your Time:** <t:${startUnix}:f>${NBSP_TILDE}<t:${endUnix}:f>`,
       `**Server Time (UTC):** ${fmtUtc(window.start)} ~ ${fmtUtc(window.end)}`
@@ -119,13 +132,11 @@ export function buildUpcomingEmbed(hours) {
   });
 
   const fields = within.length ? within.map(({ boss, window }) => {
-    const min = Number(boss.respawn_min_hours);
-    const max = Number(boss.respawn_max_hours);
-    const single = (!Number.isNaN(min) && !Number.isNaN(max) && min === max);
     const startUnix = toUnixSeconds(window.start);
     const endUnix = toUnixSeconds(window.end);
+    const isSingle = (window.start.toMillis() === window.end.toMillis());
 
-    const value = single
+    const value = isSingle
       ? [
           `**Your Time:** <t:${startUnix}:f>`,
           `**Server Time (UTC):** ${fmtUtc(window.start)}`
@@ -135,7 +146,11 @@ export function buildUpcomingEmbed(hours) {
           `**Server Time (UTC):** ${fmtUtc(window.start)} ~ ${fmtUtc(window.end)}`
         ].join('\n');
 
-    return { name: boss.name, value };
+    const label = window.trigger === 'reset'
+      ? `${boss.name} *(after server reset)*`
+      : boss.name;
+
+    return { name: label, value };
   }) : [{ name: 'No upcoming windows', value: `Nothing starts within the next ${hours} hour(s).` }];
 
   return new EmbedBuilder()
@@ -177,7 +192,7 @@ export async function handleKilled(interaction) {
     return interaction.reply({ ephemeral: true, content: 'Failed to record kill. (DB)' });
   }
 
-  // Force an immediate dashboard refresh for this guild
+  // Force an immediate dashboard refresh
   bus.emit('forceUpdate', { guildId: interaction.guildId });
 
   const updated = getBossByName(boss.name);
@@ -204,6 +219,42 @@ export async function handleKilled(interaction) {
   return interaction.reply({ embeds: [embed] });
 }
 
+export async function handleServerReset(interaction) {
+  if (!isAdminAllowed(interaction)) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /serverreset.' });
+  }
+
+  const timeStr = interaction.options.getString('server_time_hhmm', false);
+  let resetUtc = nowUtc();
+  if (timeStr) {
+    const parsed = parseServerHHmmToUtcToday(timeStr);
+    if (!parsed) {
+      return interaction.reply({ ephemeral: true, content: 'Invalid time format. Use HH:MM in UTC, e.g. 09:00' });
+    }
+    resetUtc = parsed > nowUtc() ? parsed.minus({ days: 1 }) : parsed;
+  }
+
+  const { updatedNames } = applyServerReset(resetUtc.toISO());
+
+  // Force an immediate dashboard refresh
+  bus.emit('forceUpdate', { guildId: interaction.guildId });
+
+  const embed = new EmbedBuilder()
+    .setTitle('Server Reset Applied')
+    .setDescription(
+      updatedNames.length
+        ? `Reset-based spawn timers set for:\n${updatedNames.map(n => `• ${n}`).join('\n')}`
+        : 'No bosses are configured for reset-based spawns.'
+    )
+    .addFields({
+      name: 'Reset Time',
+      value: `**Your Time:** <t:${toUnixSeconds(resetUtc)}:f>\n**Server Time (UTC):** ${fmtUtc(resetUtc)}`
+    })
+    .setColor(0x27AE60);
+
+  return interaction.reply({ embeds: [embed] });
+}
+
 export async function handleStatus(interaction) {
   if (!isAllowedForStandard(interaction, 'status')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /status.' });
@@ -226,8 +277,9 @@ export async function handleStatus(interaction) {
 
   const window = computeWindow(boss);
   const killedUnix = toUnixSeconds(window.killed);
+  const lastLabel = window.trigger === 'reset' ? 'Last Server Reset' : 'Last Death';
   const last = {
-    name: 'Last Death',
+    name: lastLabel,
     value: `**Your Time:** <t:${killedUnix}:f>\n**Server Time (UTC):** ${fmtUtc(window.killed)}`
   };
   const resp = renderWindowFields(boss, window);
@@ -252,6 +304,9 @@ export async function handleDetails(interaction) {
   const fields = [
     { name: 'Location', value: b.location || 'Unknown', inline: true },
     { name: 'Respawn Pattern', value: formatRespawnPattern(b.respawn_min_hours, b.respawn_max_hours), inline: true },
+    ...(b.reset_respawn_min_hours != null && b.reset_respawn_max_hours != null
+      ? [{ name: 'After Server Reset', value: `${b.reset_respawn_min_hours}–${b.reset_respawn_max_hours} hours`, inline: true }]
+      : []),
     { name: 'Special Conditions', value: b.special_conditions || 'None' }
   ];
 
@@ -300,7 +355,6 @@ export async function handleReset(interaction) {
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
 
-  //  only allow reset if there is something to reset
   if (!check.boss.last_killed_at_utc) {
     return interaction.reply({ ephemeral: true, content: 'That boss does not currently have a recorded kill — nothing to reset.' });
   }
@@ -312,12 +366,7 @@ export async function handleReset(interaction) {
   bus.emit('forceUpdate', { guildId: interaction.guildId });
 
   return interaction.reply({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle(`Reset: ${check.boss.name}`)
-        .setDescription('Respawn timer cleared. Status is now **Unknown**.')
-        .setColor(0xE17055)
-    ]
+    embeds: [ new EmbedBuilder().setTitle(`Reset: ${check.boss.name}`).setDescription('Respawn timer cleared. Status is now **Unknown**.').setColor(0xE17055) ]
   });
 }
 
@@ -426,7 +475,6 @@ export async function handleSetCommandRole(interaction) {
   const commandName = interaction.options.getString('command', true);
   const role = interaction.options.getRole('role', true);
 
-  // Save the gate in DB
   setCommandRole(interaction.guildId, commandName, role.id);
 
   return interaction.reply({

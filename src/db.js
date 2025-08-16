@@ -21,7 +21,10 @@ CREATE TABLE IF NOT EXISTS bosses (
   respawn_notes_json TEXT,
   last_killed_at_utc TEXT,
   window_notif_key TEXT,
-  parts_json TEXT
+  parts_json TEXT,
+  reset_respawn_min_hours REAL,
+  reset_respawn_max_hours REAL,
+  last_trigger_kind TEXT
 );
 
 CREATE TABLE IF NOT EXISTS guild_settings (
@@ -29,10 +32,10 @@ CREATE TABLE IF NOT EXISTS guild_settings (
   alert_channel_id TEXT,
   admin_role_id TEXT,
   standard_role_id TEXT,
-  upcoming_hours INTEGER,      -- NEW: lookahead for dashboard
-  ping_role_id TEXT,           -- NEW: role to @mention
-  ping_minutes INTEGER,        -- NEW: minutes before start to ping
-  alert_message_id TEXT        -- NEW: dashboard message id to edit
+  upcoming_hours INTEGER,
+  ping_role_id TEXT,
+  ping_minutes INTEGER,
+  alert_message_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS command_roles (
@@ -66,7 +69,6 @@ CREATE TABLE IF NOT EXISTS user_subscriptions (
   PRIMARY KEY (user_id, guild_id, boss_name)
 );
 
-/* NEW: channel-level ping tracking to avoid duplicate pings per window */
 CREATE TABLE IF NOT EXISTS channel_alerts (
   guild_id TEXT,
   boss_name TEXT,
@@ -82,7 +84,10 @@ for (const sql of [
   `ALTER TABLE guild_settings ADD COLUMN upcoming_hours INTEGER`,
   `ALTER TABLE guild_settings ADD COLUMN ping_role_id TEXT`,
   `ALTER TABLE guild_settings ADD COLUMN ping_minutes INTEGER`,
-  `ALTER TABLE guild_settings ADD COLUMN alert_message_id TEXT`
+  `ALTER TABLE guild_settings ADD COLUMN alert_message_id TEXT`,
+  `ALTER TABLE bosses ADD COLUMN reset_respawn_min_hours REAL`,
+  `ALTER TABLE bosses ADD COLUMN reset_respawn_max_hours REAL`,
+  `ALTER TABLE bosses ADD COLUMN last_trigger_kind TEXT`
 ]) { try { db.prepare(sql).run(); } catch { /* ignore */ } }
 
 // --------------------------
@@ -91,21 +96,25 @@ for (const sql of [
 const insertBoss = db.prepare(`
   INSERT OR IGNORE INTO bosses
   (name, location, respawn_min_hours, respawn_max_hours, special_conditions,
-   stats_json, drops_json, respawn_notes_json, last_killed_at_utc, window_notif_key, parts_json)
+   stats_json, drops_json, respawn_notes_json, last_killed_at_utc, window_notif_key,
+   parts_json, reset_respawn_min_hours, reset_respawn_max_hours, last_trigger_kind)
   VALUES (@name, @location, @respawn_min_hours, @respawn_max_hours, @special_conditions,
-          @stats_json, @drops_json, @respawn_notes_json, NULL, NULL, @parts_json)
+          @stats_json, @drops_json, @respawn_notes_json, NULL, NULL,
+          @parts_json, @reset_respawn_min_hours, @reset_respawn_max_hours, NULL)
 `);
 for (const b of bossesSeed) {
   insertBoss.run({
     name: b.name,
     location: b.location ?? '',
-    respawn_min_hours: b.respawn_min_hours ?? 0,
-    respawn_max_hours: b.respawn_max_hours ?? 0,
+    respawn_min_hours: b.respawn_min_hours ?? null,
+    respawn_max_hours: b.respawn_max_hours ?? null,
     special_conditions: b.special_conditions ?? '',
     stats_json: JSON.stringify(b.stats ?? {}),
     drops_json: JSON.stringify(b.drops ?? []),
     respawn_notes_json: JSON.stringify(b.respawn_notes ?? []),
-    parts_json: JSON.stringify(b.parts ?? null)
+    parts_json: JSON.stringify(b.parts ?? null),
+    reset_respawn_min_hours: b.reset_respawn_min_hours ?? null,
+    reset_respawn_max_hours: b.reset_respawn_max_hours ?? null
   });
 }
 
@@ -116,7 +125,7 @@ export function setKilled(bossName, utcIsoString) {
   const windowKey = `${bossName}:${utcIsoString}`;
   const stmt = db.prepare(`
     UPDATE bosses
-       SET last_killed_at_utc = ?, window_notif_key = ?
+       SET last_killed_at_utc = ?, window_notif_key = ?, last_trigger_kind = 'death'
      WHERE name = ?
   `);
   const info = stmt.run(utcIsoString, windowKey, bossName);
@@ -126,7 +135,7 @@ export function setKilled(bossName, utcIsoString) {
 export function resetBoss(bossName) {
   const stmt = db.prepare(`
     UPDATE bosses
-       SET last_killed_at_utc = NULL, window_notif_key = NULL
+       SET last_killed_at_utc = NULL, window_notif_key = NULL, last_trigger_kind = NULL
      WHERE name = ?
   `);
   const info = stmt.run(bossName);
@@ -150,6 +159,15 @@ export function listBosses() {
   return rows.map(r => r.name);
 }
 
+export function listKilledBosses() {
+  const rows = db.prepare(`
+    SELECT name FROM bosses
+     WHERE last_killed_at_utc IS NOT NULL
+     ORDER BY name
+  `).all();
+  return rows.map(r => r.name);
+}
+
 export function getAllBossRows() {
   return db.prepare(`SELECT * FROM bosses`).all().map(r => ({
     ...r,
@@ -162,21 +180,46 @@ export function getAllBossRows() {
 
 export function computeWindow(row) {
   if (!row?.last_killed_at_utc) return null;
-  const killed = DateTime.fromISO(row.last_killed_at_utc, { zone: 'utc' });
-  const start = killed.plus({ hours: row.respawn_min_hours });
-  const end   = killed.plus({ hours: row.respawn_max_hours });
-  return { start, end, killed };
+  const base = DateTime.fromISO(row.last_killed_at_utc, { zone: 'utc' });
+
+  const isReset = (row.last_trigger_kind === 'reset');
+  const minH = isReset && row.reset_respawn_min_hours != null
+    ? row.reset_respawn_min_hours
+    : row.respawn_min_hours;
+
+  const maxH = isReset && row.reset_respawn_max_hours != null
+    ? row.reset_respawn_max_hours
+    : row.respawn_max_hours;
+
+  if (minH == null || maxH == null) return null;
+
+  const start = base.plus({ hours: minH });
+  const end   = base.plus({ hours: maxH });
+  return { start, end, killed: base, trigger: isReset ? 'reset' : 'death' };
 }
 
-export function listKilledBosses() {
-  const rows = db.prepare(`
+// Apply server reset to all bosses that have reset timers
+export function applyServerReset(utcIsoString) {
+  const eligible = db.prepare(`
     SELECT name FROM bosses
-     WHERE last_killed_at_utc IS NOT NULL
-     ORDER BY name
+     WHERE reset_respawn_min_hours IS NOT NULL
+       AND reset_respawn_max_hours IS NOT NULL
   `).all();
-  return rows.map(r => r.name);
-}
 
+  const update = db.prepare(`
+    UPDATE bosses
+       SET last_killed_at_utc = ?, window_notif_key = ?, last_trigger_kind = 'reset'
+     WHERE name = ?
+  `);
+
+  const updatedNames = [];
+  for (const r of eligible) {
+    const key = `${r.name}:${utcIsoString}`;
+    const info = update.run(utcIsoString, key, r.name);
+    if (info.changes > 0) updatedNames.push(r.name);
+  }
+  return { updatedNames };
+}
 
 // --------------------------
 // Guild settings & command roles
@@ -184,7 +227,6 @@ export function listKilledBosses() {
 export function upsertGuildSettings(guildId, patch) {
   const existing = db.prepare(`SELECT * FROM guild_settings WHERE guild_id = ?`).get(guildId);
 
-  // Normalize/merge values so we always send ALL columns to SQL
   const merged = {
     alert_channel_id: patch.alert_channel_id ?? existing?.alert_channel_id ?? null,
     admin_role_id:    patch.admin_role_id    ?? existing?.admin_role_id    ?? null,
@@ -300,15 +342,6 @@ export function hasUserBeenAlerted(userId, guildId, bossName, windowKey) {
   return !!row?.alerted;
 }
 
-export function listRegisteredUsers(guildId) {
-  return db.prepare(`
-    SELECT user_id, alert_minutes
-      FROM user_registrations
-     WHERE guild_id = ?
-       AND alert_minutes IS NOT NULL
-  `).all(guildId);
-}
-
 // --------------------------
 // Subscriptions (per-boss opt-in)
 // --------------------------
@@ -358,6 +391,14 @@ export function hasChannelBeenPinged(guildId, bossName, windowKey) {
     SELECT pinged FROM channel_alerts WHERE guild_id = ? AND boss_name = ? AND window_key = ?
   `).get(guildId, bossName, windowKey);
   return !!row?.pinged;
+}
+
+export function listRegisteredUsers(guildId) {
+  const rows = db.prepare(`
+    SELECT user_id, alert_minutes FROM user_registrations
+     WHERE guild_id = ?
+  `).all(guildId);
+  return rows;
 }
 
 export default db;

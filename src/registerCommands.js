@@ -13,7 +13,6 @@ if (!DISCORD_TOKEN || !DISCORD_CLIENT_ID) {
   process.exit(1);
 }
 
-// Reusable boss option with autocomplete
 const bossOption = (opt) =>
   opt.setName('boss')
      .setDescription('Boss name')
@@ -26,7 +25,7 @@ const commands = [];
 commands.push(
   new SlashCommandBuilder()
     .setName('status')
-    .setDescription('Show status for a boss (last death & respawn)')
+    .setDescription('Show status for a boss (last death/reset & respawn)')
     .addStringOption(bossOption)
     .setDMPermission(false)
 );
@@ -60,6 +59,20 @@ commands.push(
        .setDescription('UTC time in HH:MM (24h), e.g., 21:22')
        .setRequired(false)
     )
+    .setDMPermission(false)
+);
+
+/** /serverreset (admin) */
+commands.push(
+  new SlashCommandBuilder()
+    .setName('serverreset')
+    .setDescription('Admin: apply server reset to all reset-based bosses')
+    .addStringOption(o =>
+      o.setName('server_time_hhmm')
+       .setDescription('UTC time of the reset in HH:MM (24h). Omit to use now.')
+       .setRequired(false)
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .setDMPermission(false)
 );
 
@@ -105,11 +118,11 @@ commands.push(
     .setDMPermission(false)
 );
 
-/** /upcoming - dynamic hours */
+/** /upcoming - dynamic hours (within N hours only) */
 commands.push(
   new SlashCommandBuilder()
     .setName('upcoming')
-    .setDescription('Upcoming spawns: next 3, or all within N hours (whichever is more)')
+    .setDescription('Upcoming spawns within N hours')
     .addIntegerOption(o =>
       o.setName('hours')
        .setDescription('Lookahead window in hours (default 3)')
@@ -140,7 +153,7 @@ commands.push(
 const gateableCommands = [
   'status', 'details', 'drops', 'killed',
   'subscribe', 'unsubscribe', 'subscriptions',
-  'upcoming', 'reset', 'setup'
+  'upcoming', 'reset', 'serverreset', 'setup'
 ];
 
 commands.push(
@@ -188,7 +201,7 @@ commands.push(
          .setRequired(true)
          .setAutocomplete(true)
     )
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild) // hide from non-admins
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .setDMPermission(false)
 );
 

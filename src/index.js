@@ -310,6 +310,66 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
+// --------- Spawn-approaching stale cleanup (event-driven) ----------
+async function cleanupStaleApproachingMessages(guildId, bossNames) {
+  const gs = getGuildSettings(guildId) || {};
+  if (!gs.alert_channel_id) return;
+
+  const guild = await client.guilds.fetch(guildId).catch(() => null);
+  if (!guild) return;
+  const channel = await guild.channels.fetch(gs.alert_channel_id).catch(() => null);
+  if (!channel || !('messages' in channel)) return;
+
+  // Build a quick lookup of current windows for each requested boss so we can keep the valid one
+  const rows = getAllBossRowsForGuild(guildId);
+  const currentByBoss = new Map();
+  for (const name of bossNames) {
+    const row = rows.find(r => r.name.toLowerCase() === String(name).toLowerCase());
+    if (!row) { currentByBoss.set(name, null); continue; }
+    const w = computeWindow(row);
+    currentByBoss.set(name, w || null);
+  }
+
+  // Fetch a chunk of recent messages and remove outdated “Spawn Approaching - <boss>”
+  // (If you want a deeper sweep, you can loop with { before: lastId }.)
+  const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+  if (!recent) return;
+
+  for (const name of bossNames) {
+    const window = currentByBoss.get(name); // may be null if timer cleared
+    const keepStart = window ? `<t:${toUnixSeconds(window.start)}:f>` : null;
+    const keepEnd   = window ? `<t:${toUnixSeconds(window.end)}:f>`   : null;
+
+    const candidates = [...recent.values()].filter(m => {
+      if (m.author?.id !== client.user.id) return false;
+      const embeds = m.embeds || [];
+      return embeds.some(e => (e?.title || '') === `Spawn Approaching - ${name}`);
+    });
+
+    for (const msg of candidates) {
+      // If we have a current window, keep messages that show that exact start/end; otherwise delete all
+      let isCurrent = false;
+      if (window && msg.embeds?.length) {
+        outer: for (const e of msg.embeds) {
+          const fields = e?.fields || [];
+          let sawStart = false, sawEnd = false;
+          for (const f of fields) {
+            const v = String(f?.value || '');
+            if (keepStart && v.includes(keepStart)) sawStart = true;
+            if (keepEnd   && v.includes(keepEnd))   sawEnd   = true;
+          }
+          if (sawStart && sawEnd) { isCurrent = true; break outer; }
+        }
+      }
+      if (!isCurrent) {
+        await msg.delete().catch(() => {});
+        // We intentionally do not mark the DB row as deleted here; the time-based
+        // cleanup will mark it when it comes due even if the message is already gone.
+      }
+    }
+  }
+}
+
 // --------- Scheduler: update dashboard + role pings + DMs + cleanup ----------
 async function tickOnce(onlyGuildId = null) {
   const guilds = onlyGuildId
@@ -480,6 +540,17 @@ setInterval(() => { tickOnce().catch(() => {}); }, 60 * 1000);
 bus.on('forceUpdate', (payload) => {
   const gid = payload?.guildId ?? null;
   tickOnce(gid).catch(() => {});
+});
+
+// NEW: listen for event-driven stale cleanup
+bus.on('cleanupStaleApproaching', (payload) => {
+  const guildId = payload?.guildId;
+  if (!guildId) return;
+  const names = Array.isArray(payload?.bossNames)
+    ? payload.bossNames
+    : (payload?.bossName ? [payload.bossName] : []);
+  if (!names.length) return;
+  cleanupStaleApproachingMessages(guildId, names).catch(() => {});
 });
 
 process.on('unhandledRejection', (err) => {

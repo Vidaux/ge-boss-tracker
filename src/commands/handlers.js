@@ -6,6 +6,7 @@ import {
   computeWindow,
   getGuildSettings,
   upsertGuildSettings,
+  getAllGuildSettings,
   setCommandRole,
   getCommandRole,
   upsertUserAlertMinutes,
@@ -234,6 +235,9 @@ export async function handleKilled(interaction) {
     return interaction.reply({ ephemeral: true, content: 'Failed to record kill. (DB)' });
   }
 
+  // Event-driven cleanup: remove any stale "Spawn Approaching" messages for this boss
+  bus.emit('cleanupStaleApproaching', { guildId: interaction.guildId, bossNames: [bossMeta.name] });
+
   // Force an immediate dashboard refresh
   bus.emit('forceUpdate', { guildId: interaction.guildId });
 
@@ -277,6 +281,11 @@ export async function handleServerReset(interaction) {
   }
 
   const { updatedNames } = applyServerReset(interaction.guildId, resetUtc.toISO());
+
+  // Event-driven cleanup for any bosses whose window just changed
+  if (updatedNames && updatedNames.length) {
+    bus.emit('cleanupStaleApproaching', { guildId: interaction.guildId, bossNames: updatedNames });
+  }
 
   // Force an immediate dashboard refresh
   bus.emit('forceUpdate', { guildId: interaction.guildId });
@@ -416,6 +425,9 @@ export async function handleReset(interaction) {
 
   const ok = resetBoss(interaction.guildId, bossRow.name);
   if (!ok) return interaction.reply({ ephemeral: true, content: 'Failed to reset boss.' });
+
+  // Event-driven cleanup: remove any stale "Spawn Approaching" messages for this boss
+  bus.emit('cleanupStaleApproaching', { guildId: interaction.guildId, bossNames: [bossRow.name] });
 
   // Force an immediate dashboard refresh for this guild
   bus.emit('forceUpdate', { guildId: interaction.guildId });

@@ -142,7 +142,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             ? listUserSubscriptions(interaction.user.id, interaction.guildId)
             : [];
         } else if (interaction.commandName === 'reset') {
-          // Only bosses with a recorded kill — guild scoped
+          // Only bosses with a recorded kill - guild scoped
           sourceNames = listKilledBosses(interaction.guildId);
         } else if (interaction.commandName === 'details' || interaction.commandName === 'drops') {
           // All bosses (tracked + untracked) for info-only commands

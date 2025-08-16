@@ -420,7 +420,7 @@ export async function handleReset(interaction) {
   if (guardMsg) return interaction.reply({ ephemeral: true, content: guardMsg });
 
   if (!bossRow.last_killed_at_utc) {
-    return interaction.reply({ ephemeral: true, content: 'That boss does not currently have a recorded kill — nothing to reset.' });
+    return interaction.reply({ ephemeral: true, content: 'That boss does not currently have a recorded kill - nothing to reset.' });
   }
 
   const ok = resetBoss(interaction.guildId, bossRow.name);

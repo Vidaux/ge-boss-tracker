@@ -75,7 +75,7 @@ Tracks **Granado Espada** boss respawn windows. Uses **UTC internally** and Disc
 
 ### Admin
 
-- `/setup` — **Wizard** (no args)  
+- `/setup` - **Wizard** (no args)  
   Interactive embed with dropdowns to configure:
   1) **Alert Channel** (dashboard & pings)
   2) **Ping Role** (optional)

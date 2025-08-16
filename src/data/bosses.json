@@ -39,5 +39,802 @@
       "Spawns 24~48 hours after death",
       "Server restart does not affect respawn"
     ]
+  },
+  {
+    "name": "Vergo The Cursed",
+    "location": "Porto Bello, Desolate Cliff",
+    "respawn_min_hours": 12,
+    "respawn_max_hours": 12,
+    "special_conditions": "Drop a Silver Maul on the tombstone. Obtain a Silver Maul by killing the Bellboy of Mein.",
+    "stats": {
+      "Max HP": 2639589,
+      "A.R.": 57,
+      "ATK": 15787,
+      "D.R.": 57,
+      "DEF": 143,
+      "Fire RES": 55,
+      "Ice RES": 55,
+      "Lightning RES": 55,
+      "Mental RES": 55,
+      "Type": "Human"
+    },
+    "drops": [
+      "Diamond Coupon",
+      "Grand Level Valkyries Crasher",
+      "Bellem Box",
+      "Random Ring",
+      "Random Unique Equip",
+      "Random Normal Equip",
+      "Level 100 Enchantment Chip",
+      "Key of Vergo",
+      "Level 84 Elite Weapon",
+      "Level 100 Weapon",
+      "The Hilt of Elite Grim-Wraith",
+      "The Hilt of Elite Daemon Slayer",
+      "The Hilt of Elite Black Dragon",
+      "The Hilt of Elite Grim-stick",
+      "Pieces of Elite Ziz",
+      "Random necklace",
+      "Veteran Scroll",
+      "Expert Scroll"
+    ],
+    "respawn_notes": [
+      "Can be summoned 12 hours after the last summon",
+      "Server restart does not affect respawn"
+    ]
+  },
+  {
+    "name": "Rafflesia (Legs)",
+    "location": "Rafflesia (entrance located in Ustiur, Zona Uno)",
+    "respawn_min_hours": 24,
+    "respawn_max_hours": 48,
+    "special_conditions": "The Green, Yellow and Red leaves of Rafflesia are required to enter the boss room.",
+    "stats": {
+      "Max HP": 2009721,
+      "A.R.": 54,
+      "ATK": 39014,
+      "D.R.": 54,
+      "DEF": 118,
+      "Fire RES": 40,
+      "Ice RES": 40,
+      "Lightning RES": 40,
+      "Mental RES": 40,
+      "Type": "Wildlife"
+    },
+    "drops": [
+      "Grand Level Valkyries Crasher",
+      "Random Unique Equip",
+      "Random Normal Equip",
+      "Level 92 elite armor recipes",
+      "Level 84 Elite equips",
+      "Level 100 Armor",
+      "Veteran Scroll",
+      "Expert Scroll"
+    ],
+    "respawn_notes": [
+      "Spawns 24~48 hours after death",
+      "Server restart does not affect respawn"
+    ]
+  },
+  {
+    "name": "Rafflesia (Egg)",
+    "location": "Rafflesia (entrance located in Ustiur, Zona Uno)",
+    "respawn_min_hours": 24,
+    "respawn_max_hours": 48,
+    "special_conditions": "The Green, Yellow and Red leaves of Rafflesia are required to enter the boss room.",
+    "stats": {
+      "Max HP": 2926706,
+      "A.R.": 62,
+      "ATK": 14221,
+      "D.R.": 62,
+      "DEF": 133,
+      "Fire RES": 60,
+      "Ice RES": 60,
+      "Lightning RES": 60,
+      "Mental RES": 60,
+      "Type": "Wildlife"
+    },
+    "drops": [
+      "Grand Level Valkyries Crasher",
+      "Random Unique Equip",
+      "Random Normal Equip",
+      "Level 92 elite armor recipes",
+      "Level 84 Elite equips",
+      "Level 100 Armor",
+      "Veteran Scroll",
+      "Expert Scroll"
+    ],
+    "respawn_notes": [
+      "Spawns 24~48 hours after death",
+      "Server restart does not affect respawn"
+    ]
+  },
+  {
+    "name": "Rafflesia (Torso)",
+    "location": "Rafflesia (entrance located in Ustiur, Zona Uno)",
+    "respawn_min_hours": 24,
+    "respawn_max_hours": 48,
+    "special_conditions": "The Green, Yellow and Red leaves of Rafflesia are required to enter the boss room.",
+    "stats": {
+      "Max HP": 1292245,
+      "A.R.": 57,
+      "ATK": 64818,
+      "D.R.": 57,
+      "DEF": 123,
+      "Fire RES": 45,
+      "Ice RES": 45,
+      "Lightning RES": 45,
+      "Mental RES": 45,
+      "Type": "Wildlife"
+    },
+    "drops": [
+      "Grand Level Valkyries Crasher",
+      "Random Unique Equip",
+      "Random Normal Equip",
+      "Level 92 elite armor recipes",
+      "Level 84 Elite equips",
+      "Level 100 Armor",
+      "Veteran Scroll",
+      "Expert Scroll"
+    ],
+    "respawn_notes": [
+      "Spawns 24~48 hours after death",
+      "Server restart does not affect respawn"
+    ]
+  },
+  {
+    "name": "Diablo",
+    "location": "Pradera de Ceniza",
+    "respawn_min_hours": 12,
+    "respawn_max_hours": 12,
+    "special_conditions": "Drop 99 Mega Talts on the Demon Well.",
+    "stats": {
+      "Max HP": 1378090,
+      "A.R.": 54,
+      "ATK": 9838,
+      "D.R.": 54,
+      "DEF": 162,
+      "Fire RES": 50,
+      "Ice RES": 40,
+      "Lightning RES": 50,
+      "Mental RES": 50,
+      "Type": "Demon"
+    },
+    "drops": [
+      "Diamond Coupon",
+      "Grand Level Valkyries Crasher",
+      "Bellem Box",
+      "Random Ring",
+      "Random Unique Equip",
+      "Random Normal Equip",
+      "Level 96 Enchantment Chip",
+      "Level 84 Elite Equips",
+      "Veteran Scroll"
+    ],
+    "respawn_notes": [
+      "Can be summoned 12 hours after the last summon",
+      "Server restart does not affect respawn"
+    ]
+  },
+  {
+    "name": "Hellbreaker",
+    "location": "Tubkal Mine",
+    "respawn_min_hours": 10.5,
+    "respawn_max_hours": 10.5,
+    "special_conditions": "Activate two mechanisms using Keys of Capybara.",
+    "stats": {
+      "Max HP": 10308480,
+      "A.R.": 54,
+      "ATK": 3686,
+      "D.R.": 54,
+      "DEF": 102,
+      "Fire RES": 20,
+      "Ice RES": 20,
+      "Lightning RES": 20,
+      "Mental RES": 20,
+      "Type": "Lifeless"
+    },
+    "drops": [
+      "Old Journal 10",
+      "Mysterious Steel Piece",
+      "Grand Level Valkyries Crasher",
+      "Bellem Box",
+      "Random Ring",
+      "Random Unique Equip",
+      "Random Normal Equip",
+      "Steel series weapon recipes",
+      "Level 84 Elite Equips",
+      "Veteran Scroll"
+    ],
+    "respawn_notes": [
+      "Can be summoned 10.5 hours after the last summon",
+      "Server restart does not affect respawn"
+    ]
+  },
+  {
+    "name": "Elmorc",
+    "location": "Katovic Snowfield, Frozen Plain",
+    "respawn_min_hours": 1,
+    "respawn_max_hours": 1.5,
+    "special_conditions": "None",
+    "stats": {
+      "Max HP": 1720512,
+      "A.R.": 55,
+      "ATK": 3048,
+      "D.R.": 55,
+      "DEF": 189,
+      "Fire RES": 30,
+      "Ice RES": 90,
+      "Lightning RES": 30,
+      "Mental RES": 30,
+      "Type": "Human"
+    },
+    "drops": [
+      "Diamond Coupon",
+      "Bellem Box",
+      "Random Ring",
+      "Random Unique Equip",
+      "Random Normal Equip",
+      "Level 92 Enchantment Chip",
+      "Level 96 Enchantment Chip",
+      "Level 96 Unique Metal armor",
+      "Pure Gold Bar",
+      "Level 84 Elite Equips",
+      "Level 84 Elite Recipes"
+    ],
+    "respawn_notes": [
+      "Spawns 1-1.5 hours after server restart",
+      "Spawns 1-1.5 hours after death"
+    ]
+  },
+  {
+    "name": "Gerero",
+    "location": "Prison de Joaquin, Gehenna Bridge",
+    "respawn_min_hours": 3.5,
+    "respawn_max_hours": 3.5,
+    "special_conditions": "None",
+    "stats": {
+      "Max HP": 1553798,
+      "A.R.": 52,
+      "ATK": 5491,
+      "D.R.": 52,
+      "DEF": 156,
+      "Fire RES": 55,
+      "Ice RES": 55,
+      "Lightning RES": 55,
+      "Mental RES": 55,
+      "Type": "Demon"
+    },
+    "drops": [
+      "Diamond Coupon",
+      "Grand Level Valkyries Crasher",
+      "Bellem Box",
+      "Random Ring",
+      "Random Unique Equip",
+      "Random Normal Equip",
+      "Level 96 Enchantment Chip",
+      "Level 84 Elite Equips",
+      "Fire RES necklace",
+      "Veteran scroll"
+    ],
+    "respawn_notes": []
+  },
+  {
+    "name": "Soul Mothtein",
+    "location": "Prison de Joaquin, Torture Chamber",
+    "respawn_min_hours": 24,
+    "respawn_max_hours": 24,
+    "special_conditions": "Spawns when all 24 Torches of Bernal are lit.",
+    "stats": {
+      "Max HP": 750103,
+      "A.R.": 52,
+      "ATK": 8287,
+      "D.R.": 52,
+      "DEF": 120,
+      "Fire RES": 50,
+      "Ice RES": 50,
+      "Lightning RES": 50,
+      "Mental RES": 50,
+      "Type": "Human"
+    },
+    "drops": [
+      "Random Ring",
+      "Random Unique Equip",
+      "Random Normal Equip",
+      "Level 84 Elite Equips",
+      "Veteran scroll"
+    ],
+    "respawn_notes": [
+      "Initial spawn on server restart",
+      "Spawns 24 hours after death"
+    ]
+  },
+  {
+    "name": "Dream Blade Antelope",
+    "location": "Via Fluvial, Deprimida Valley",
+    "respawn_min_hours": 1,
+    "respawn_max_hours": 1.5,
+    "special_conditions": "None",
+    "stats": {
+      "Max HP": 1070927,
+      "A.R.": 52,
+      "ATK": 7187,
+      "D.R.": 52,
+      "DEF": 208,
+      "Fire RES": 60,
+      "Ice RES": 60,
+      "Lightning RES": 60,
+      "Mental RES": 60,
+      "Type": "Wildlife"
+    },
+    "drops": [
+      "Diamond Coupon",
+      "Bellem Box",
+      "Random Ring",
+      "Random Unique Equip",
+      "Random Normal Equip",
+      "Level 92 Enchantment Chip",
+      "Level 92 armor",
+      "Pure Gold Bar",
+      "Sharp Horn",
+      "Level 84 Elite Equips",
+      "Level 84 Elite Recipes"
+    ],
+    "respawn_notes": [
+      "Spawns 1-1.5 hours after server restart",
+      "Spawns 1-1.5 hours after death"
+    ]
+  },
+  {
+    "name": "Gulfaxi",
+    "location": "Capybara Plantation, Mine Passage, Tubkal Mine",
+    "respawn_min_hours": 3,
+    "respawn_max_hours": 3,
+    "special_conditions": "Drop 200 Capybara Food on food pack to obtain a helpful buff.",
+    "stats": {
+      "Max HP": 1433760,
+      "A.R.": 55,
+      "ATK": 21319,
+      "D.R.": 55,
+      "DEF": 100,
+      "Fire RES": 40,
+      "Ice RES": 40,
+      "Lightning RES": 40,
+      "Mental RES": 40,
+      "Type": "Undead"
+    },
+    "drops": [
+      "Key of Capybara",
+      "Red Ticket of the Secret Room",
+      "Yellow Ticket of the Secret Room",
+      "Blue Ticket of the Secret Room",
+      "Green Ticket of the Secret Room"
+    ],
+    "respawn_notes": []
+  },
+  {
+    "name": "Avalanche Revenant",
+    "location": "Snowfield of the Ice Wizard",
+    "respawn_min_hours": 5,
+    "respawn_max_hours": 5,
+    "special_conditions": "None",
+    "stats": {
+      "Max HP": 176315,
+      "A.R.": 59,
+      "ATK": 13203,
+      "D.R.": 59,
+      "DEF": 134,
+      "Fire RES": 30,
+      "Ice RES": 30,
+      "Lightning RES": 30,
+      "Mental RES": 30,
+      "Type": "Undead"
+    },
+    "drops": [
+      "Red Jewel Fragment",
+      "Random Ring",
+      "Random Unique Equip",
+      "Random Normal Equip",
+      "Level 92 Enchantment Chip",
+      "Pure Gold Bar",
+      "Level 84 Elite Equips",
+      "Level 84 Elite Recipes"
+    ],
+    "respawn_notes": []
+  },
+  {
+    "name": "Dekaravia",
+    "location": "Old Port of Coimbra",
+    "respawn_min_hours": 7,
+    "respawn_max_hours": 9,
+    "special_conditions": "Applies a strong debuff to characters whose level is significantly higher.",
+    "stats": {
+      "Max HP": 794392,
+      "A.R.": 37,
+      "ATK": 3194,
+      "D.R.": 37,
+      "DEF": 54,
+      "Fire RES": 40,
+      "Ice RES": 40,
+      "Lightning RES": 20,
+      "Mental RES": 40,
+      "Type": "Undead"
+    },
+    "drops": [
+      "68-72 lvl equip",
+      "68 lvl elite equip",
+      "Diamond coupon",
+      "Enchant Chips lvl 76",
+      "Veteran Promotion Scroll",
+      "+5 Impervium: Normal (Weapon)"
+    ],
+    "respawn_notes": [
+      "Spawns 7-9 hours after death",
+      "Server restart does not affect respawn"
+    ]
+  },
+  {
+    "name": "Rod of Mueletos",
+    "location": "Tierra de Los Muertos",
+    "respawn_min_hours": 30,
+    "respawn_max_hours": 30,
+    "special_conditions": "None",
+    "stats": {
+      "Max HP": 10639200,
+      "A.R.": 62,
+      "ATK": 74970,
+      "D.R.": 62,
+      "DEF": 238,
+      "Fire RES": 80,
+      "Ice RES": 80,
+      "Lightning RES": 80,
+      "Mental RES": 80,
+      "Type": "Undead"
+    },
+    "drops": [
+      "Lv. 84 elite weapon",
+      "Lv. 100 weapon",
+      "Lv. 100 armor",
+      "Lv. 92 elite armor recipe",
+      "Lv. 92 elite weapon",
+      "Enchant Chips Lv. 92",
+      "Enchant Chips Lv. 100",
+      "Pure Gold Bar"
+    ],
+    "respawn_notes": [
+      "Despawn time: 7 hours"
+    ]
+  },
+  {
+    "name": "Uraeus",
+    "location": "Bahamar, Underground Cave 2F",
+    "respawn_min_hours": 24,
+    "respawn_max_hours": 48,
+    "special_conditions": "None",
+    "stats": {
+      "Max HP": 31811056,
+      "A.R.": 61,
+      "ATK": 2650,
+      "D.R.": 61,
+      "DEF": 182,
+      "Fire RES": 50,
+      "Ice RES": 50,
+      "Lightning RES": 50,
+      "Mental RES": 50,
+      "Type": "Wildlife"
+    },
+    "drops": [
+      "Level 84 Elite equip",
+      "Level 100 equip",
+      "Level 100 Elite weapon recipe",
+      "Recipe - Schvarlier Armor",
+      "Le Noir Armor",
+      "Elite Le Blanc Armor"
+    ],
+    "respawn_notes": [
+      "Initial spawn on server restart",
+      "Spawns 24~48 hours after death"
+    ]
+  },
+  {
+    "name": "King of Greed",
+    "location": "Bahamar, Underground Cave 1F",
+    "respawn_min_hours": 3.5,
+    "respawn_max_hours": 5,
+    "special_conditions": "None",
+    "stats": {
+      "Max HP": 2419200,
+      "A.R.": 57,
+      "ATK": 5896,
+      "D.R.": 57,
+      "DEF": 188,
+      "Fire RES": 30,
+      "Ice RES": 30,
+      "Lightning RES": 30,
+      "Mental RES": 30,
+      "Type": "Undead"
+    },
+    "drops": [
+      "Random Unique Equip",
+      "Random Normal Equip",
+      "Enchant Chips lvl 92-100",
+      "Pure Gold Bar",
+      "Level 84 Elite equip recipe",
+      "Level 84 Elite equips",
+      "Level 92 Elite armor recipe",
+      "Golden series weapon recipe",
+      "Recipe - Dragon Heart"
+    ],
+    "respawn_notes": [
+      "Spawns 3 hours 30 mins ~ 5 hours after server restart",
+      "Spawns 3 hours 30 mins ~ 5 hours after death"
+    ]
+  },
+  {
+    "name": "Swamp Angler",
+    "location": "Bahamar, Dark Swamp, Swamp of Peril",
+    "respawn_min_hours": 2.25,
+    "respawn_max_hours": 3.25,
+    "special_conditions": "None",
+    "stats": {
+      "Max HP": 2061696,
+      "A.R.": 56,
+      "ATK": 5184,
+      "D.R.": 56,
+      "DEF": 172,
+      "Fire RES": 30,
+      "Ice RES": 30,
+      "Lightning RES": 30,
+      "Mental RES": 30,
+      "Type": "Wildlife"
+    },
+    "drops": [
+      "Random Unique Equip",
+      "Random Normal Equip",
+      "Enchant Chips lvl 92-100",
+      "Pure Gold Bar",
+      "Level 84 Elite equip recipe",
+      "Level 84 Elite equip",
+      "Level 92 Elite armor recipe",
+      "Recipe - Dragon Heart"
+    ],
+    "respawn_notes": [
+      "Spawns 2 hours 15 mins ~ 3 hours 15 mins after server restart",
+      "Spawns 2 hours 15 mins ~ 3 hours 15 mins after death"
+    ]
+  },
+  {
+    "name": "Arctic Merman Eater",
+    "location": "Scorching Plateau, Ferruccio Wall, El Tierra Blanco, The Frozen Plain, Snowfield of Ice Wizard",
+    "respawn_min_hours": 4,
+    "respawn_max_hours": 4.5,
+    "special_conditions": "None",
+    "stats": {
+      "Max HP": 1432944,
+      "A.R.": 59,
+      "ATK": 9535,
+      "D.R.": 59,
+      "DEF": 174,
+      "Fire RES": 30,
+      "Ice RES": 30,
+      "Lightning RES": 30,
+      "Mental RES": 30,
+      "Type": "Wildlife"
+    },
+    "drops": [
+      "Random Unique Equip",
+      "Random Normal Equip",
+      "Enchant Chips lvl 92-96",
+      "Bellem Box",
+      "Mega Talt",
+      "Level 84 Elite equip",
+      "Level 92 Elite armor recipe"
+    ],
+    "respawn_notes": [
+      "Spawns 4-4.5 hours after server restart",
+      "Do not respawn until the next server restart"
+    ]
+  },
+  {
+    "name": "Swamp Merman Eater",
+    "location": "Bahamar Marshlands, Dark Swamp, Swamp of Eternity, Swamp of Peril",
+    "respawn_min_hours": 4,
+    "respawn_max_hours": 4.5,
+    "special_conditions": "None",
+    "stats": {
+      "Max HP": 1209600,
+      "A.R.": 57,
+      "ATK": 8942,
+      "D.R.": 57,
+      "DEF": 162,
+      "Fire RES": 30,
+      "Ice RES": 30,
+      "Lightning RES": 30,
+      "Mental RES": 30,
+      "Type": "Wildlife"
+    },
+    "drops": [
+      "Random Unique Equip",
+      "Random Normal Equip",
+      "Enchant Chips lvl 92-96",
+      "Bellem Box",
+      "Mega Talt",
+      "Level 84 Elite equip",
+      "Level 92 Elite armor recipe"
+    ],
+    "respawn_notes": [
+      "Spawns 4-4.5 hours after server restart",
+      "Do not respawn until the next server restart"
+    ]
+  },
+  {
+    "name": "Praire Merman Eater",
+    "location": "Abertal, Via Fluvial, Deprimida Valley",
+    "respawn_min_hours": 4,
+    "respawn_max_hours": 4.5,
+    "special_conditions": "None",
+    "stats": {
+      "Max HP": 1003632,
+      "A.R.": 55,
+      "ATK": 8367,
+      "D.R.": 55,
+      "DEF": 189,
+      "Fire RES": 30,
+      "Ice RES": 30,
+      "Lightning RES": 30,
+      "Mental RES": 30,
+      "Type": "Wildlife"
+    },
+    "drops": [
+      "Random Unique Equip",
+      "Random Normal Equip",
+      "Enchant Chips lvl 92-96",
+      "Bellem Box",
+      "Mega Talt",
+      "Level 84 Elite equip",
+      "Level 92 elite armor recipe"
+    ],
+    "respawn_notes": [
+      "Spawns 4-4.5 hours after server restart",
+      "Do not respawn until the next server restart"
+    ]
+  },
+  {
+    "name": "Bribantra",
+    "location": "Corazon de Gigante",
+    "respawn_min_hours": 8,
+    "respawn_max_hours": 8,
+    "special_conditions": "None",
+    "stats": {
+      "Max HP": 1844160,
+      "A.R.": 65,
+      "ATK": 4007,
+      "D.R.": 65,
+      "DEF": 233,
+      "Fire RES": 55,
+      "Ice RES": 55,
+      "Lightning RES": 55,
+      "Mental RES": 55,
+      "Type": "Lifeless"
+    },
+    "drops": [
+      "Enchant Chips Lv. 100",
+      "Level 84 elite equipment",
+      "Level 100 equipment",
+      "Level 92 elite armor recipes",
+      "Le Noir armor recipes"
+    ],
+    "respawn_notes": [
+      "Spawns 8 hours after death",
+      "Spawns 8 hours after server restart"
+    ]
+  },
+  {
+    "name": "Argus",
+    "location": "Cabeza de Gigante",
+    "respawn_min_hours": 24,
+    "respawn_max_hours": 36,
+    "special_conditions": "Use energy sources around the arena to protect from debuffs. The Brain of Argus remains safe until Argus is killed; kill the Brain for loot.",
+    "stats": {
+      "Max HP": 3020544,
+      "A.R.": 66,
+      "ATK": 7032,
+      "D.R.": 66,
+      "DEF": 251,
+      "Fire RES": 60,
+      "Ice RES": 60,
+      "Lightning RES": 60,
+      "Mental RES": 60,
+      "Type": "Lifeless"
+    },
+    "drops": [
+      "Enchant Chips Lv. 100",
+      "Level 84 elite equipment",
+      "Level 100 equipment",
+      "Level 92 elite armor recipes",
+      "Le Noir armor",
+      "Elite Le Blanc armor",
+      "Recipe - Will of Argus",
+      "Recipe - Hope of Argus",
+      "Promotion Scroll - Veteran",
+      "Promotion Scroll - Expert",
+      "+5 Impervium: Normal (Weapon)",
+      "+5 Impervium: Veteran (Weapon)"
+    ],
+    "respawn_notes": [
+      "Spawns 24-36 hours after death",
+      "Server restart does not affect respawn"
+    ]
+  },
+  {
+    "name": "Argus Brain",
+    "location": "Cabeza de Gigante",
+    "respawn_min_hours": 24,
+    "respawn_max_hours": 36,
+    "special_conditions": "Appears with Argus encounter; remains safe until Argus is killed. Kill the Brain to get loot.",
+    "stats": {
+      "Max HP": 15843400,
+      "A.R.": 66,
+      "ATK": 10800,
+      "D.R.": 66,
+      "DEF": 255,
+      "Fire RES": 60,
+      "Ice RES": 60,
+      "Lightning RES": 60,
+      "Mental RES": 60,
+      "Type": "Demon"
+    },
+    "drops": [
+      "Enchant Chips Lv. 100",
+      "Level 84 elite equipment",
+      "Level 100 equipment",
+      "Level 92 elite armor recipes",
+      "Le Noir armor",
+      "Elite Le Blanc armor",
+      "Recipe - Will of Argus",
+      "Recipe - Hope of Argus",
+      "Promotion Scroll - Veteran",
+      "Promotion Scroll - Expert",
+      "+5 Impervium: Normal (Weapon)",
+      "+5 Impervium: Veteran (Weapon)"
+    ],
+    "respawn_notes": [
+      "Spawns 24-36 hours after death",
+      "Server restart does not affect respawn"
+    ]
+  },
+  {
+    "name": "Undertaker",
+    "location": "Subterraneo Solferino",
+    "respawn_min_hours": 8,
+    "respawn_max_hours": 9,
+    "special_conditions": "None",
+    "stats": {
+      "Max HP": 7960800,
+      "A.R.": 59,
+      "ATK": 7356,
+      "D.R.": 59,
+      "DEF": 234,
+      "Fire RES": 35,
+      "Ice RES": 35,
+      "Lightning RES": 35,
+      "Mental RES": 61,
+      "Type": "Human"
+    },
+    "drops": [
+      "Enchant Chips Lv. 100",
+      "Enchant Chips Lv. 92",
+      "Level 84 Elite Weapon",
+      "Level 100 Weapon",
+      "Ogre weapon recipes",
+      "Werewolf weapon recipes",
+      "Level 92 Elite armor recipes",
+      "Le Noir armor recipes",
+      "Level 100 Elite weapon recipes"
+    ],
+    "respawn_notes": [
+      "Spawns 8-9 hours after death",
+      "Spawns 8-9 hours after server restart"
+    ]
   }
 ]

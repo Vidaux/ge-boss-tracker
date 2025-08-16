@@ -97,6 +97,14 @@ commands.push(
     .setDMPermission(false)
 );
 
+/** /subscriptions (new) */
+commands.push(
+  new SlashCommandBuilder()
+    .setName('subscriptions')
+    .setDescription('Show all bosses you are currently subscribed to')
+    .setDMPermission(false)
+);
+
 /** /listbosses */
 commands.push(
   new SlashCommandBuilder()
@@ -132,7 +140,7 @@ commands.push(
 /** /setcommandrole */
 const gateableCommands = [
   'status', 'details', 'drops', 'killed',
-  'subscribe', 'unsubscribe',
+  'subscribe', 'unsubscribe', 'subscriptions',
   'reset'
 ];
 
@@ -155,7 +163,7 @@ commands.push(
     .setDMPermission(false)
 );
 
-/** /setalert */
+/** /setalert (only adjusts minutes) */
 commands.push(
   new SlashCommandBuilder()
     .setName('setalert')

@@ -13,6 +13,7 @@ import {
   handleSubscribeAll,
   handleUnsubscribeBoss,
   handleUnsubscribeAll,
+  handleSubscriptions,
   handleKilled,
   handleStatus,
   handleDetails,
@@ -23,7 +24,7 @@ import {
   handleSetAlert
 } from './commands/handlers.js';
 
-import { listBosses } from './db.js';
+import { listBosses, listUserSubscriptions } from './db.js'; // include subs for autocomplete
 
 const { DISCORD_TOKEN } = process.env;
 
@@ -53,7 +54,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const focused = interaction.options.getFocused(true);
       if (focused?.name === 'boss') {
         const query = String(focused.value || '').toLowerCase();
-        const names = listBosses()
+
+        // If the command is /unsubscribe boss, only show bosses THIS user is subscribed to
+        let sourceNames;
+        if (interaction.commandName === 'unsubscribe') {
+          // Avoid throwing if no subcommand (older clients)
+          const sub = interaction.options.getSubcommand(false);
+          if (!sub || sub === 'boss') {
+            sourceNames = listUserSubscriptions(interaction.user.id, interaction.guildId);
+          } else {
+            sourceNames = listBosses();
+          }
+        } else {
+          sourceNames = listBosses();
+        }
+
+        const names = sourceNames
           .filter(n => n.toLowerCase().includes(query))
           .slice(0, 25);
         return interaction.respond(names.map(n => ({ name: n, value: n })));
@@ -90,6 +106,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         else await interaction.reply({ ephemeral: true, content: 'Unknown /unsubscribe subcommand.' });
         break;
       }
+
+      case 'subscriptions':
+        await handleSubscriptions(interaction);
+        break;
 
       case 'killed':
         await handleKilled(interaction);

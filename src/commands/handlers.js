@@ -211,6 +211,23 @@ export async function handleUnsubscribeAll(interaction) {
   return interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
+// /subscriptions — list user's current subscriptions
+export async function handleSubscriptions(interaction) {
+  if (!isAllowedForStandard(interaction, 'subscriptions')) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /subscriptions.' });
+  }
+
+  const subs = listUserSubscriptions(interaction.user.id, interaction.guildId);
+  const desc = subs.length ? subs.map(b => `• ${b}`).join('\n') : 'None';
+
+  const embed = new EmbedBuilder()
+    .setTitle('Your Subscriptions')
+    .setDescription(desc)
+    .setColor(0x8E44AD);
+
+  return interaction.reply({ embeds: [embed], ephemeral: true });
+}
+
 // /killed
 export async function handleKilled(interaction) {
   if (!isAllowedForStandard(interaction, 'killed')) {

@@ -1,7 +1,7 @@
 [
   {
     "name": "Griffon",
-    "location": "Vegas Javier",
+    "location": ["Vegas Javier"],
     "respawn_min_hours": 24,
     "respawn_max_hours": 48,
     "special_conditions": "Find a Griffon Egg and break it to summon the boss",
@@ -42,7 +42,7 @@
   },
   {
     "name": "Vergo The Cursed",
-    "location": "Porto Bello, Desolate Cliff",
+    "location": ["Porto Bello, Desolate Cliff"],
     "respawn_min_hours": 12,
     "respawn_max_hours": 12,
     "special_conditions": "Drop a Silver Maul on the tombstone. Obtain a Silver Maul by killing the Bellboy of Mein.",
@@ -85,7 +85,7 @@
   },
   {
     "name": "Rafflesia",
-    "location": "Rafflesia (entrance located in Ustiur, Zona Uno)",
+    "location": ["Ustiur, Zona Uno"],
     "respawn_min_hours": 24,
     "respawn_max_hours": 48,
     "special_conditions": "The Green, Yellow and Red leaves of Rafflesia are required to enter the boss room.",
@@ -121,7 +121,7 @@
   },
   {
     "name": "Diablo",
-    "location": "Pradera de Ceniza",
+    "location": ["Pradera de Ceniza"],
     "respawn_min_hours": 12,
     "respawn_max_hours": 12,
     "special_conditions": "Drop 99 Mega Talts on the Demon Well.",
@@ -155,7 +155,7 @@
   },
   {
     "name": "Hellbreaker",
-    "location": "Tubkal Mine",
+    "location": ["Tubkal Mine"],
     "respawn_min_hours": 10.5,
     "respawn_max_hours": 10.5,
     "special_conditions": "Activate two mechanisms using Keys of Capybara.",
@@ -190,7 +190,7 @@
   },
   {
     "name": "Elmorc",
-    "location": "Katovic Snowfield, Frozen Plain",
+    "location": ["Katovic Snowfield", "Frozen Plain"],
     "respawn_min_hours": 1,
     "respawn_max_hours": 1.5,
     "special_conditions": "None",
@@ -228,7 +228,7 @@
   },
   {
     "name": "Gerero",
-    "location": "Prison de Joaquin, Gehenna Bridge",
+    "location": ["Prison de Joaquin, Gehenna Bridge"],
     "respawn_min_hours": 3.5,
     "respawn_max_hours": 3.5,
     "special_conditions": "None",
@@ -260,7 +260,7 @@
   },
   {
     "name": "Soul Mothtein",
-    "location": "Prison de Joaquin, Torture Chamber",
+    "location": ["Prison de Joaquin, Torture Chamber"],
     "respawn_min_hours": 24,
     "respawn_max_hours": 24,
     "special_conditions": "Spawns when all 24 Torches of Bernal are lit.",
@@ -292,7 +292,7 @@
   },
   {
     "name": "Dream Blade Antelope",
-    "location": "Via Fluvial, Deprimida Valley",
+    "location": ["Via Fluvial", "Deprimida Valley"],
     "respawn_min_hours": 1,
     "respawn_max_hours": 1.5,
     "special_conditions": "None",
@@ -330,7 +330,7 @@
   },
   {
     "name": "Gulfaxi",
-    "location": "Capybara Plantation, Mine Passage, Tubkal Mine",
+    "location": ["Capybara Plantation", "Mine Passage", "Tubkal Mine"],
     "respawn_min_hours": 3,
     "respawn_max_hours": 3,
     "special_conditions": "Drop 200 Capybara Food on food pack to obtain a helpful buff.",
@@ -357,7 +357,7 @@
   },
   {
     "name": "Avalanche Revenant",
-    "location": "Snowfield of the Ice Wizard",
+    "location": ["Snowfield of the Ice Wizard"],
     "respawn_min_hours": 5,
     "respawn_max_hours": 5,
     "special_conditions": "None",
@@ -387,7 +387,7 @@
   },
   {
     "name": "Dekaravia",
-    "location": "Old Port of Coimbra",
+    "location": ["Old Port of Coimbra"],
     "respawn_min_hours": 7,
     "respawn_max_hours": 9,
     "special_conditions": "Applies a strong debuff to characters whose level is significantly higher.",
@@ -418,7 +418,7 @@
   },
   {
     "name": "Rod of Mueletos",
-    "location": "Tierra de Los Muertos",
+    "location": ["Tierra de Los Muertos"],
     "respawn_min_hours": 30,
     "respawn_max_hours": 30,
     "special_conditions": "None",
@@ -450,7 +450,7 @@
   },
   {
     "name": "Uraeus",
-    "location": "Bahamar, Underground Cave 2F",
+    "location": ["Bahamar, Underground Cave 2F"],
     "respawn_min_hours": 24,
     "respawn_max_hours": 48,
     "special_conditions": "None",
@@ -483,7 +483,10 @@
   },
   {
     "name": "King of Greed",
-    "location": "Bahamar, Underground Cave 1F",
+    "location": [
+      "Bahamar, Underground Cave 1F Marshlands",
+      "Bahamar, Underground Cave 1F Swamp of Peril"
+    ],
     "respawn_min_hours": 3.5,
     "respawn_max_hours": 5,
     "special_conditions": "None",
@@ -519,7 +522,10 @@
   },
   {
     "name": "Swamp Angler",
-    "location": "Bahamar, Dark Swamp, Swamp of Peril",
+    "location": [
+      "Bahamar Dark Swamp",
+      "Bahamar Swamp of Peril"
+    ],
     "respawn_min_hours": 2.25,
     "respawn_max_hours": 3.25,
     "special_conditions": "None",
@@ -554,7 +560,13 @@
   },
   {
     "name": "Arctic Merman Eater",
-    "location": "Scorching Plateau, Ferruccio Wall, El Tierra Blanco, The Frozen Plain, Snowfield of Ice Wizard",
+    "location": [
+      "Scorching Plateau",
+      "Ferruccio Wall",
+      "El Tierra Blanco",
+      "The Frozen Plain",
+      "Snowfield of Ice Wizard"
+    ],
     "respawn_min_hours": 4,
     "respawn_max_hours": 4.5,
     "special_conditions": "None",
@@ -588,7 +600,12 @@
   },
   {
     "name": "Swamp Merman Eater",
-    "location": "Bahamar Marshlands, Dark Swamp, Swamp of Eternity, Swamp of Peril",
+    "location": [
+      "Bahamar Marshlands",
+      "Dark Swamp",
+      "Swamp of Eternity",
+      "Swamp of Peril"
+    ],
     "respawn_min_hours": 4,
     "respawn_max_hours": 4.5,
     "special_conditions": "None",
@@ -622,7 +639,7 @@
   },
   {
     "name": "Praire Merman Eater",
-    "location": "Abertal, Via Fluvial, Deprimida Valley",
+    "location": ["Abertal", "Via Fluvial", "Deprimida Valley"],
     "respawn_min_hours": 4,
     "respawn_max_hours": 4.5,
     "special_conditions": "None",
@@ -656,7 +673,7 @@
   },
   {
     "name": "Bribantra",
-    "location": "Corazon de Gigante",
+    "location": ["Corazon de Gigante"],
     "respawn_min_hours": 8,
     "respawn_max_hours": 8,
     "special_conditions": "None",
@@ -688,7 +705,7 @@
   },
   {
     "name": "Argus",
-    "location": "Cabeza de Gigante",
+    "location": ["Cabeza de Gigante"],
     "respawn_min_hours": 24,
     "respawn_max_hours": 36,
     "special_conditions": "Use energy sources around the arena to protect from debuffs. The Brain of Argus remains safe until Argus is killed; kill the Brain for loot.",
@@ -724,7 +741,7 @@
   },
   {
     "name": "Undertaker",
-    "location": "Subterraneo Solferino",
+    "location": ["Subterraneo Solferino"],
     "respawn_min_hours": 8,
     "respawn_max_hours": 9,
     "special_conditions": "None",
@@ -760,7 +777,7 @@
   },
   {
     "name": "Novia",
-    "location": "The Ice Wizard's Tower",
+    "location": ["The Ice Wizard's Tower"],
     "respawn_min_hours": 36,
     "respawn_max_hours": 72,
     "server_reset_min_hours": 0,
@@ -806,7 +823,7 @@
   },
   {
     "name": "Gate of Lightning",
-    "location": "Rio Albi",
+    "location": ["Rio Albi"],
     "respawn_min_hours": 28,
     "respawn_max_hours": 28,
     "special_conditions": "Use Lightning Orb to open the gate in Rio Albi. Lightning Orb is one of Federigo's quest rewards.",
@@ -850,7 +867,7 @@
   },
   {
     "name": "Gate of Flame",
-    "location": "Topolo Durga",
+    "location": ["Topolo Durga"],
     "special_conditions": "Use Fire Orb to open the gate in Topolo Durga. Fire Orbs are one of Federigo's quest rewards. Use Fire Orbs to remove the ten seals of Lava Leaf.",
     "stats": {
       "Max HP": 7991781,
@@ -888,7 +905,7 @@
   },
   {
     "name": "Hell Valley",
-    "location": "El Canon de Diabolica",
+    "location": ["El Canon de Diabolica"],
     "special_conditions": "Hell Valley Key x1 required. Obtain from hunting in El Canon de Diabolica and El Ruina de Memoria.",
     "stats": {
       "Max HP": 34290430,
@@ -919,7 +936,7 @@
   },
   {
     "name": "Jormongand",
-    "location": "Vegas Javier",
+    "location": ["Vegas Javier"],
     "special_conditions": "Symbol of Jormongand x1 required (recipe from Precious Metals Merchant in City of Auch). Each participant must have ≥ 500 family reputation.",
     "stats": {
       "Max HP": 6368640,

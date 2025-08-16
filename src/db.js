@@ -119,8 +119,19 @@ for (const sql of [
 ]) { try { db.prepare(sql).run(); } catch { /* ignore */ } }
 
 // --------------------------
-// Seeding bosses (static metadata)
+// Seeding bosses (per-location expansion)
 // --------------------------
+function asLocationArray(loc) {
+  // New format: array already
+  if (Array.isArray(loc)) {
+    return loc.map(s => String(s).trim()).filter(Boolean);
+  }
+  // Back-compat: split only on "|" (never on comma; many legit names contain commas)
+  const raw = String(loc || '').trim();
+  if (!raw) return [];
+  return raw.split('|').map(s => s.trim()).filter(Boolean);
+}
+
 const insertBoss = db.prepare(`
   INSERT OR IGNORE INTO bosses
   (name, location, respawn_min_hours, respawn_max_hours, special_conditions,
@@ -130,21 +141,33 @@ const insertBoss = db.prepare(`
           @stats_json, @drops_json, @respawn_notes_json, NULL, NULL,
           @parts_json, @reset_respawn_min_hours, @reset_respawn_max_hours, NULL)
 `);
+
 for (const b of bossesSeed) {
-  insertBoss.run({
-    name: b.name,
-    location: b.location ?? '',
-    respawn_min_hours: b.respawn_min_hours ?? null,
-    respawn_max_hours: b.respawn_max_hours ?? null,
-    special_conditions: b.special_conditions ?? '',
-    stats_json: JSON.stringify(b.stats ?? {}),
-    drops_json: JSON.stringify(b.drops ?? []),
-    respawn_notes_json: JSON.stringify(b.respawn_notes ?? []),
-    parts_json: JSON.stringify(b.parts ?? null),
-    reset_respawn_min_hours: b.reset_respawn_min_hours ?? null,
-    reset_respawn_max_hours: b.reset_respawn_max_hours ?? null
+  const locs = asLocationArray(b.location);
+  const multi = locs.length > 1;
+
+  // If multiple locations → create one row per location with "Name - Location"
+  // If single or empty → keep original name
+  const entries = (multi ? locs : [locs[0] ?? '']).map(loc => {
+    const name = multi ? `${b.name} - ${loc}` : b.name;
+    return {
+      name,
+      location: loc || (Array.isArray(b.location) ? (b.location[0] ?? '') : String(b.location ?? '')),
+      respawn_min_hours: b.respawn_min_hours ?? null,
+      respawn_max_hours: b.respawn_max_hours ?? null,
+      special_conditions: b.special_conditions ?? '',
+      stats_json: JSON.stringify(b.stats ?? {}),
+      drops_json: JSON.stringify(b.drops ?? []),
+      respawn_notes_json: JSON.stringify(b.respawn_notes ?? []),
+      parts_json: JSON.stringify(b.parts ?? null),
+      reset_respawn_min_hours: b.reset_respawn_min_hours ?? null,
+      reset_respawn_max_hours: b.reset_respawn_max_hours ?? null
+    };
   });
+
+  for (const row of entries) insertBoss.run(row);
 }
+
 
 // --------------------------
 // One-time backfill: migrate legacy global kills -> per-guild

@@ -69,11 +69,16 @@ CREATE TABLE IF NOT EXISTS user_subscriptions (
   PRIMARY KEY (user_id, guild_id, boss_name)
 );
 
+/* Includes metadata for cleanup of channel messages */
 CREATE TABLE IF NOT EXISTS channel_alerts (
   guild_id TEXT,
   boss_name TEXT,
   window_key TEXT,
   pinged INTEGER,
+  channel_id TEXT,
+  message_id TEXT,
+  delete_after_utc TEXT,
+  deleted INTEGER,
   PRIMARY KEY (guild_id, boss_name, window_key)
 );
 `);
@@ -89,7 +94,12 @@ for (const sql of [
   `ALTER TABLE guild_settings ADD COLUMN alert_message_id TEXT`,
   `ALTER TABLE bosses ADD COLUMN reset_respawn_min_hours REAL`,
   `ALTER TABLE bosses ADD COLUMN reset_respawn_max_hours REAL`,
-  `ALTER TABLE bosses ADD COLUMN last_trigger_kind TEXT`
+  `ALTER TABLE bosses ADD COLUMN last_trigger_kind TEXT`,
+  // channel_alerts cleanup metadata
+  `ALTER TABLE channel_alerts ADD COLUMN channel_id TEXT`,
+  `ALTER TABLE channel_alerts ADD COLUMN message_id TEXT`,
+  `ALTER TABLE channel_alerts ADD COLUMN delete_after_utc TEXT`,
+  `ALTER TABLE channel_alerts ADD COLUMN deleted INTEGER`
 ]) { try { db.prepare(sql).run(); } catch { /* ignore */ } }
 
 // --------------------------
@@ -186,21 +196,44 @@ export function getAllBossRows() {
   }));
 }
 
+/**
+ * Compute the active window.
+ * - If last_trigger_kind === 'reset' and reset_respawn_* exist, use those.
+ * - Else, if standard respawn_min/max exist, use them.
+ * - Else, return null (untracked boss).
+ */
 export function computeWindow(row) {
   if (!row?.last_killed_at_utc) return null;
 
-  // NEW: do not compute for untracked/static bosses
-  if (row.respawn_min_hours == null || row.respawn_max_hours == null) {
-    return null;
+  const killed = DateTime.fromISO(row.last_killed_at_utc, { zone: 'utc' });
+
+  // Prefer reset-based window when last trigger was a server reset
+  if (
+    row.last_trigger_kind === 'reset' &&
+    row.reset_respawn_min_hours != null &&
+    row.reset_respawn_max_hours != null
+  ) {
+    const start = killed.plus({ hours: Number(row.reset_respawn_min_hours) });
+    const end   = killed.plus({ hours: Number(row.reset_respawn_max_hours) });
+    return { start, end, killed, trigger: 'reset' };
   }
 
-  const killed = DateTime.fromISO(row.last_killed_at_utc, { zone: 'utc' });
-  const start = killed.plus({ hours: row.respawn_min_hours });
-  const end   = killed.plus({ hours: row.respawn_max_hours });
-  return { start, end, killed };
+  // Fall back to normal (death-based) window if configured
+  if (row.respawn_min_hours != null && row.respawn_max_hours != null) {
+    const start = killed.plus({ hours: Number(row.respawn_min_hours) });
+    const end   = killed.plus({ hours: Number(row.respawn_max_hours) });
+    return { start, end, killed, trigger: 'death' };
+  }
+
+  // Untracked/static boss
+  return null;
 }
 
-// Apply server reset to all bosses that have reset timers
+/**
+ * Apply a server reset at the given ISO timestamp.
+ * For all bosses that have reset_respawn_min/max set (not null),
+ * set last_killed_at_utc to the reset time and mark last_trigger_kind = 'reset'.
+ */
 export function applyServerReset(utcIsoString) {
   const eligible = db.prepare(`
     SELECT name FROM bosses
@@ -378,8 +411,16 @@ export function userHasAnySubscriptions(userId, guildId) {
   return !!row;
 }
 
+export function listRegisteredUsers(guildId) {
+  const rows = db.prepare(`
+    SELECT user_id, alert_minutes FROM user_registrations
+     WHERE guild_id = ?
+  `).all(guildId);
+  return rows;
+}
+
 // --------------------------
-// Channel ping tracking
+// Channel ping tracking + cleanup helpers
 // --------------------------
 export function markChannelPinged(guildId, bossName, windowKey) {
   db.prepare(`
@@ -395,12 +436,41 @@ export function hasChannelBeenPinged(guildId, bossName, windowKey) {
   return !!row?.pinged;
 }
 
-export function listRegisteredUsers(guildId) {
-  const rows = db.prepare(`
-    SELECT user_id, alert_minutes FROM user_registrations
+/** Store the message so it can be deleted later */
+export function recordChannelPingMessage(guildId, bossName, windowKey, channelId, messageId, deleteAfterIso) {
+  db.prepare(`
+    INSERT INTO channel_alerts (guild_id, boss_name, window_key, pinged, channel_id, message_id, delete_after_utc, deleted)
+    VALUES (?, ?, ?, 1, ?, ?, ?, 0)
+    ON CONFLICT(guild_id, boss_name, window_key) DO UPDATE SET
+      pinged = 1,
+      channel_id = excluded.channel_id,
+      message_id = excluded.message_id,
+      delete_after_utc = excluded.delete_after_utc,
+      deleted = 0
+  `).run(guildId, bossName, windowKey, channelId, messageId, deleteAfterIso);
+}
+
+/** Find messages that are due to be deleted now (or earlier) */
+export function listChannelMessagesDueForDeletion(guildId, nowIso) {
+  return db.prepare(`
+    SELECT guild_id, boss_name, window_key, channel_id, message_id
+      FROM channel_alerts
      WHERE guild_id = ?
-  `).all(guildId);
-  return rows;
+       AND (deleted IS NULL OR deleted = 0)
+       AND message_id IS NOT NULL
+       AND channel_id IS NOT NULL
+       AND delete_after_utc IS NOT NULL
+       AND delete_after_utc <= ?
+  `).all(guildId, nowIso);
+}
+
+/** Mark a channel alert row as deleted (so we don't try again) */
+export function markChannelAlertDeleted(guildId, bossName, windowKey) {
+  db.prepare(`
+    UPDATE channel_alerts
+       SET deleted = 1
+     WHERE guild_id = ? AND boss_name = ? AND window_key = ?
+  `).run(guildId, bossName, windowKey);
 }
 
 export default db;

@@ -29,7 +29,6 @@ import {
 } from './commands/handlers.js';
 
 import {
-  listBosses,
   listUserSubscriptions,
   getGuildSettings,
   upsertGuildSettings,
@@ -37,11 +36,13 @@ import {
   getAllBossRows,
   computeWindow,
   hasChannelBeenPinged,
-  markChannelPinged,
   listRegisteredUsers,
   hasUserBeenAlerted,
   markUserAlerted,
-  listKilledBosses
+  listKilledBosses,
+  recordChannelPingMessage,
+  listChannelMessagesDueForDeletion,
+  markChannelAlertDeleted
 } from './db.js';
 
 import { nowUtc, fmtUtc, toUnixSeconds } from './utils/time.js';
@@ -254,7 +255,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-// --------- Scheduler: update dashboard + ping role + DMs ----------
+// --------- Scheduler: update dashboard + role pings + DMs + cleanup ----------
 async function tickOnce(onlyGuildId = null) {
   const guilds = onlyGuildId
     ? [getGuildSettings(onlyGuildId)].filter(Boolean)
@@ -265,7 +266,7 @@ async function tickOnce(onlyGuildId = null) {
   for (const gs of guilds) {
     if (!gs.alert_channel_id) continue;
 
-    // 1) Update dashboard
+    // 1) Update dashboard message if configured
     const hours = gs.upcoming_hours ?? 3;
     if (gs.alert_message_id) {
       try {
@@ -282,10 +283,10 @@ async function tickOnce(onlyGuildId = null) {
           const newMsg = await channel.send({ embeds: [embed] });
           upsertGuildSettings(gs.guild_id, { alert_message_id: newMsg.id });
         }
-      } catch { /* ignore */ }
+      } catch { /* ignore per-guild errors */ }
     }
 
-    // 2) Role pings near window start
+    // 2) Ping role if a window is approaching (and record the message for later cleanup)
     if (gs.ping_role_id && gs.ping_minutes) {
       const rows = getAllBossRows();
       const channelGuild = await client.guilds.fetch(gs.guild_id).catch(() => null);
@@ -304,7 +305,7 @@ async function tickOnce(onlyGuildId = null) {
 
         if (now >= threshold && now < w.start) {
           try {
-            await channel.send({
+            const sent = await channel.send({
               content: `<@&${gs.ping_role_id}>`,
               allowedMentions: { roles: [gs.ping_role_id] },
               embeds: [
@@ -317,21 +318,35 @@ async function tickOnce(onlyGuildId = null) {
                   .setColor(0xF39C12)
               ]
             });
-            markChannelPinged(gs.guild_id, b.name, windowKey);
-          } catch { /* ignore */ }
+
+            // Record message so we can auto-delete it 30 minutes after window end
+            const deleteAfter = w.end.plus({ minutes: 30 });
+            recordChannelPingMessage(
+              gs.guild_id,
+              b.name,
+              windowKey,
+              gs.alert_channel_id,
+              sent.id,
+              deleteAfter.toISO()
+            );
+          } catch {
+            /* ignore send errors */
+          }
         }
       }
     }
 
-    // 3) DM alerts for subscribed users
+    // 3) DM alerts to subscribed users when their lead time hits
     try {
       const rows = getAllBossRows();
-      const regs = listRegisteredUsers(gs.guild_id);
+      const regs = listRegisteredUsers(gs.guild_id); // users with alert_minutes set
+
+      // For DMs we optionally include the Guild name in the embed footer
       const guildObj = await client.guilds.fetch(gs.guild_id).catch(() => null);
 
       for (const reg of regs) {
         const subs = listUserSubscriptions(reg.user_id, gs.guild_id);
-        if (!subs || subs.length === 0) continue;
+        if (!subs || subs.length === 0) continue; // opt-in model: no subs, no DMs
 
         for (const b of rows) {
           if (!subs.includes(b.name)) continue;
@@ -343,6 +358,7 @@ async function tickOnce(onlyGuildId = null) {
           const windowKey = `${b.name}:${b.last_killed_at_utc}`;
           if (hasUserBeenAlerted(reg.user_id, gs.guild_id, b.name, windowKey)) continue;
 
+          // When the user's alert lead time hits
           const threshold = w.start.minus({ minutes: reg.alert_minutes || 30 });
           if (now >= threshold && now < w.start) {
             try {
@@ -352,8 +368,10 @@ async function tickOnce(onlyGuildId = null) {
               const embed = new EmbedBuilder()
                 .setTitle(`Spawn Approaching - ${b.name}`)
                 .addFields(
-                  { name: 'Window Start', value: `**Your Time:** <t:${toUnixSeconds(w.start)}:f>\n**Server Time (UTC):** ${fmtUtc(w.start)}` },
-                  { name: 'Window End', value: `**Your Time:** <t:${toUnixSeconds(w.end)}:f>\n**Server Time (UTC):** ${fmtUtc(w.end)}` }
+                  { name: 'Window Start',
+                    value: `**Your Time:** <t:${toUnixSeconds(w.start)}:f>\n**Server Time (UTC):** ${fmtUtc(w.start)}` },
+                  { name: 'Window End',
+                    value: `**Your Time:** <t:${toUnixSeconds(w.end)}:f>\n**Server Time (UTC):** ${fmtUtc(w.end)}` }
                 )
                 .setFooter({ text: guildObj ? `Guild: ${guildObj.name}` : 'Boss Alert' })
                 .setColor(0x2ECC71);
@@ -361,19 +379,49 @@ async function tickOnce(onlyGuildId = null) {
               await user.send({ embeds: [embed] }).catch(() => {});
               markUserAlerted(reg.user_id, gs.guild_id, b.name, windowKey);
             } catch {
-              /* ignore DM errors */
+              // ignore DM errors (user has DMs off, left the server, etc.)
             }
           }
         }
       }
     } catch {
-      /* ignore */
+      // ignore per-guild DM errors
+    }
+
+    // 4) Cleanup: delete "Spawn Approaching" messages 30 minutes after window end
+    try {
+      const due = listChannelMessagesDueForDeletion(gs.guild_id, now.toISO());
+      if (due && due.length) {
+        const guild = await client.guilds.fetch(gs.guild_id).catch(() => null);
+        if (!guild) continue;
+
+        for (const row of due) {
+          try {
+            const ch = await guild.channels.fetch(row.channel_id).catch(() => null);
+            if (!ch) {
+              markChannelAlertDeleted(gs.guild_id, row.boss_name, row.window_key);
+              continue;
+            }
+            const msg = await ch.messages.fetch(row.message_id).catch(() => null);
+            if (msg) {
+              await msg.delete().catch(() => {});
+            }
+          } finally {
+            // Mark deleted regardless of actual delete result to avoid endless retries
+            markChannelAlertDeleted(gs.guild_id, row.boss_name, row.window_key);
+          }
+        }
+      }
+    } catch {
+      /* ignore cleanup errors */
     }
   }
 }
 
+// Regular tick (every minute)
 setInterval(() => { tickOnce().catch(() => {}); }, 60 * 1000);
 
+// Immediate per-guild refresh when handlers ask for it
 bus.on('forceUpdate', (payload) => {
   const gid = payload?.guildId ?? null;
   tickOnce(gid).catch(() => {});

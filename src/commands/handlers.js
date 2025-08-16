@@ -12,7 +12,8 @@ import {
   addSubscription,
   listUserSubscriptions,
   getUserRegistration,
-  removeSubscription
+  removeSubscription,
+  getAllBossRows
 } from '../db.js';
 
 import {
@@ -96,7 +97,7 @@ function renderWindowFields(boss, window) {
 
 function dropsField(boss) {
   const drops = (boss.drops || []);
-  const value = drops.length ? drops.map(d => `• ${d}`).join('\n') : '—';
+  const value = drops.length ? drops.map(d => `• ${d}`).join('\n') : '-';
   // Discord field limit is 1024 chars; trim defensively
   return { name: 'Drops', value: value.slice(0, 1024) };
 }
@@ -211,7 +212,7 @@ export async function handleUnsubscribeAll(interaction) {
   return interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
-// /subscriptions — list user's current subscriptions
+// /subscriptions - list user's current subscriptions
 export async function handleSubscriptions(interaction) {
   if (!isAllowedForStandard(interaction, 'subscriptions')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /subscriptions.' });
@@ -398,7 +399,7 @@ export async function handleDetails(interaction) {
       const statsLines = Object.entries(part.stats || {})
         .map(([k, v]) => `**${k}**: ${v}`)
         .join('\n') || '-';
-      fields.push({ name: `Stats — ${part.name}`, value: statsLines });
+      fields.push({ name: `Stats - ${part.name}`, value: statsLines });
     }
   } else {
     const statsLines = Object.entries(b.stats || {})
@@ -421,7 +422,7 @@ export async function handleDetails(interaction) {
   });
 }
 
-// /drops (unchanged — already dedicated to drop list)
+// /drops (unchanged - already dedicated to drop list)
 export async function handleDrops(interaction) {
   if (!isAllowedForStandard(interaction, 'drops')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /drops.' });
@@ -430,7 +431,7 @@ export async function handleDrops(interaction) {
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
   const b = check.boss;
-  const drops = (b.drops || []).map(d => `• ${d}`).join('\n') || '—';
+  const drops = (b.drops || []).map(d => `• ${d}`).join('\n') || '-';
 
   return interaction.reply({
     embeds: [
@@ -512,4 +513,82 @@ export async function handleSetAlert(interaction) {
   }
   upsertUserAlertMinutes(interaction.user.id, interaction.guildId, minutes);
   return interaction.reply({ ephemeral: true, content: `DM alert lead time set to **~${minutes} minutes** before a subscribed boss window.` });
+}
+
+// /upcoming — next 3 overall OR everyone starting within 3 hours (whichever set is larger)
+export async function handleUpcoming(interaction) {
+  if (!isAllowedForStandard(interaction, 'upcoming')) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /upcoming.' });
+  }
+
+  const NBSP_TILDE = '\u00A0~\u00A0';
+  const now = nowUtc();
+  const horizon = now.plus({ hours: 3 });
+
+  // Build candidate windows from bosses that have a known last death and a window not yet ended
+  const rows = getAllBossRows();
+  const candidates = [];
+  for (const b of rows) {
+    if (!b.last_killed_at_utc) continue;
+    const w = computeWindow(b);
+    if (w.end <= now) continue; // window already ended
+    candidates.push({ boss: b, window: w });
+  }
+
+  if (!candidates.length) {
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle('Upcoming Spawns')
+          .setDescription('No upcoming spawn windows are tracked yet.')
+          .setColor(0x95A5A6)
+      ],
+      ephemeral: true
+    });
+  }
+
+  // Sort by effective start time (current windows first, then soonest)
+  candidates.sort((a, b) => {
+    const aStart = a.window.start < now ? now : a.window.start;
+    const bStart = b.window.start < now ? now : b.window.start;
+    return aStart.toMillis() - bStart.toMillis();
+  });
+
+  // Group A: all starting by horizon (or already open)
+  const within3h = candidates.filter(c => c.window.start <= horizon);
+
+  // Group B: top 3 overall
+  const top3 = candidates.slice(0, 3);
+
+  // Pick whichever set is larger
+  const pick = within3h.length > top3.length ? within3h : top3;
+
+  // Build fields (no relative times; show single time if min==max)
+  const fields = pick.map(({ boss, window }) => {
+    const min = Number(boss.respawn_min_hours);
+    const max = Number(boss.respawn_max_hours);
+    const single = (!Number.isNaN(min) && !Number.isNaN(max) && min === max);
+
+    const startUnix = toUnixSeconds(window.start);
+    const endUnix = toUnixSeconds(window.end);
+
+    const value = single
+      ? [
+          `**Your Time:** <t:${startUnix}:f>`,
+          `**Server Time (UTC):** ${fmtUtc(window.start)}`
+        ].join('\n')
+      : [
+          `**Your Time:** <t:${startUnix}:f>${NBSP_TILDE}<t:${endUnix}:f>`,
+          `**Server Time (UTC):** ${fmtUtc(window.start)} ~ ${fmtUtc(window.end)}`
+        ].join('\n');
+
+    return { name: boss.name, value };
+  });
+
+  const embed = new EmbedBuilder()
+    .setTitle('Upcoming Spawns')
+    .addFields(...fields)
+    .setColor(0x00A8FF);
+
+  return interaction.reply({ embeds: [embed] });
 }

@@ -97,11 +97,19 @@ commands.push(
     .setDMPermission(false)
 );
 
-/** /subscriptions (new) */
+/** /subscriptions */
 commands.push(
   new SlashCommandBuilder()
     .setName('subscriptions')
     .setDescription('Show all bosses you are currently subscribed to')
+    .setDMPermission(false)
+);
+
+/** /upcoming  */
+commands.push(
+  new SlashCommandBuilder()
+    .setName('upcoming')
+    .setDescription('Show upcoming boss spawn windows (next 3, or all within 3 hours - whichever is more)')
     .setDMPermission(false)
 );
 
@@ -141,7 +149,7 @@ commands.push(
 const gateableCommands = [
   'status', 'details', 'drops', 'killed',
   'subscribe', 'unsubscribe', 'subscriptions',
-  'reset'
+  'reset', 'upcoming'
 ];
 
 commands.push(

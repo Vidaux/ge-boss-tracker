@@ -14,6 +14,7 @@ import {
   handleUnsubscribeBoss,
   handleUnsubscribeAll,
   handleSubscriptions,
+  handleUpcoming,        // <— NEW
   handleKilled,
   handleStatus,
   handleDetails,
@@ -24,7 +25,7 @@ import {
   handleSetAlert
 } from './commands/handlers.js';
 
-import { listBosses, listUserSubscriptions } from './db.js'; // include subs for autocomplete
+import { listBosses, listUserSubscriptions } from './db.js';
 
 const { DISCORD_TOKEN } = process.env;
 
@@ -58,7 +59,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
         // If the command is /unsubscribe boss, only show bosses THIS user is subscribed to
         let sourceNames;
         if (interaction.commandName === 'unsubscribe') {
-          // Avoid throwing if no subcommand (older clients)
           const sub = interaction.options.getSubcommand(false);
           if (!sub || sub === 'boss') {
             sourceNames = listUserSubscriptions(interaction.user.id, interaction.guildId);
@@ -72,6 +72,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const names = sourceNames
           .filter(n => n.toLowerCase().includes(query))
           .slice(0, 25);
+
         return interaction.respond(names.map(n => ({ name: n, value: n })));
       }
     } catch (err) {
@@ -109,6 +110,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       case 'subscriptions':
         await handleSubscriptions(interaction);
+        break;
+
+      case 'upcoming':
+        await handleUpcoming(interaction);
         break;
 
       case 'killed':

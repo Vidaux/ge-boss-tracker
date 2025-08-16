@@ -3,7 +3,7 @@ import { DateTime } from 'luxon';
 import path from 'node:path';
 import bossesSeed from './data/bosses.json' with { type: 'json' };
 
-const DB_PATH = path.join(process.cwd(), 'ge-boss-bot.sqlite');
+const DB_PATH = path.join(process.cwd(), 'ge-boss-tracker.sqlite');
 const db = new Database(DB_PATH);
 
 // --------------------------

@@ -256,16 +256,14 @@ export async function handleDetails(interaction) {
   if (Array.isArray(b.parts) && b.parts.length) {
     for (const part of b.parts) {
       const statsLines = Object.entries(part.stats || {}).map(([k, v]) => `**${k}**: ${v}`).join('\n') || '-';
-      fields.push({ name: `Stats — ${part.name}`, value: statsLines });
+      fields.push({ name: `Stats - ${part.name}`, value: statsLines });
     }
   } else {
     const statsLines = Object.entries(b.stats || {}).map(([k, v]) => `**${k}**: ${v}`).join('\n') || '-';
     fields.push({ name: 'Stats', value: statsLines });
   }
 
-  if ((b.drops || []).length) {
-    fields.push({ name: 'Drops', value: (b.drops || []).map(d => `• ${d}`).join('\n') });
-  }
+  // Keep notes if present, but no Drops field
   if ((b.respawn_notes || []).length) {
     fields.push({ name: 'Notes', value: (b.respawn_notes || []).map(n => `• ${n}`).join('\n') });
   }

@@ -171,8 +171,11 @@ export async function handleStatus(interaction) {
 
   const window = computeWindow(boss);
   const killedUnix = toUnixSeconds(window.killed);
-  const startUnix = toUnixSeconds(window.start);
-  const endUnix = toUnixSeconds(window.end);
+  const startUnix  = toUnixSeconds(window.start);
+  const endUnix    = toUnixSeconds(window.end);
+
+  // Non-breaking space around the tilde prevents line breaks there
+  const NBSP_TILDE = '\u00A0~\u00A0';
 
   const embed = new EmbedBuilder()
     .setTitle(`${boss.name} Status`)
@@ -180,14 +183,15 @@ export async function handleStatus(interaction) {
       {
         name: 'Last Death',
         value: [
-          `**Your Time:** <t:${killedUnix}:F>`,
+          `**Your Time:** <t:${killedUnix}:f>`,                 // was :F → now :f (shorter)
           `**Server Time (UTC):** ${fmtUtc(window.killed)}`
         ].join('\n')
       },
       {
         name: 'Respawn Window',
         value: [
-          `**Your Time:** <t:${startUnix}:F> ~ <t:${endUnix}:F>`,
+          // tighten around the tilde to reduce wrap points
+          `**Your Time:** <t:${startUnix}:f>${NBSP_TILDE}<t:${endUnix}:f>`,
           `**Server Time (UTC):** ${fmtUtc(window.start)} ~ ${fmtUtc(window.end)}`
         ].join('\n')
       }

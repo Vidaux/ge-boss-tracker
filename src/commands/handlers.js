@@ -92,6 +92,13 @@ function renderWindowFields(boss, window) {
   };
 }
 
+function dropsField(boss) {
+  const drops = (boss.drops || []);
+  const value = drops.length ? drops.map(d => `• ${d}`).join('\n') : '-';
+  // Discord field limit is 1024 chars; trim defensively
+  return { name: 'Drops', value: value.slice(0, 1024) };
+}
+
 // ---------- commands ----------
 
 // /listbosses
@@ -112,16 +119,20 @@ export async function handleSubscribe(interaction) {
   const bossName = titleCase(interaction.options.getString('boss', true));
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
+  const boss = check.boss;
 
-  addSubscription(interaction.user.id, interaction.guildId, check.boss.name);
+  addSubscription(interaction.user.id, interaction.guildId, boss.name);
 
   const current = listUserSubscriptions(interaction.user.id, interaction.guildId);
   const desc = current.length ? current.map(b => `• ${b}`).join('\n') : 'None';
 
   const embed = new EmbedBuilder()
     .setTitle('Subscribed to Boss')
-    .setDescription(`You will receive alerts for **${check.boss.name}** when you have a /setalert configured.`)
-    .addFields({ name: 'Your Subscriptions', value: desc })
+    .setDescription(`You will receive alerts for **${boss.name}** when you have a /setalert configured.`)
+    .addFields(
+      { name: 'Your Subscriptions', value: desc },
+      dropsField(boss)
+    )
     .setColor(0x1ABC9C);
 
   return interaction.reply({ embeds: [embed], ephemeral: true });
@@ -171,6 +182,7 @@ export async function handleKilled(interaction) {
   if (Array.isArray(updated.parts) && updated.parts.length) {
     fields.push({ name: 'Boss Parts', value: updated.parts.map(p => `• ${p.name}`).join('\n') });
   }
+  fields.push(dropsField(updated));
 
   const embed = new EmbedBuilder()
     .setTitle(`Recorded Kill: ${updated.name}`)
@@ -203,7 +215,8 @@ export async function handleStatus(interaction) {
           .setDescription('Last kill time: **Unknown**\nRespawn: **Unknown**')
           .addFields(
             { name: 'Respawn Pattern', value: formatRespawnPattern(boss.respawn_min_hours, boss.respawn_max_hours) },
-            ...partsField
+            ...partsField,
+            dropsField(boss)
           )
           .setColor(0xD63031)
       ]
@@ -226,6 +239,7 @@ export async function handleStatus(interaction) {
   if (Array.isArray(boss.parts) && boss.parts.length) {
     fields.push({ name: 'Boss Parts', value: boss.parts.map(p => `• ${p.name}`).join('\n') });
   }
+  fields.push(dropsField(boss));
 
   const embed = new EmbedBuilder()
     .setTitle(`${boss.name} Status`)
@@ -236,7 +250,7 @@ export async function handleStatus(interaction) {
   return interaction.reply({ embeds: [embed] });
 }
 
-// /details
+// /details  (now includes Drops per your latest request)
 export async function handleDetails(interaction) {
   if (!isAllowedForStandard(interaction, 'details')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /details.' });
@@ -263,10 +277,12 @@ export async function handleDetails(interaction) {
     fields.push({ name: 'Stats', value: statsLines });
   }
 
-  // Keep notes if present, but no Drops field
   if ((b.respawn_notes || []).length) {
     fields.push({ name: 'Notes', value: (b.respawn_notes || []).map(n => `• ${n}`).join('\n') });
   }
+
+  // Add Drops (new request)
+  fields.push(dropsField(b));
 
   return interaction.reply({
     embeds: [
@@ -278,7 +294,7 @@ export async function handleDetails(interaction) {
   });
 }
 
-// /drops
+// /drops (unchanged - already dedicated to drop list)
 export async function handleDrops(interaction) {
   if (!isAllowedForStandard(interaction, 'drops')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /drops.' });
@@ -293,7 +309,7 @@ export async function handleDrops(interaction) {
     embeds: [
       new EmbedBuilder()
         .setTitle(`${b.name} - Drops`)
-        .setDescription(drops)
+        .setDescription(drops.slice(0, 4096)) // description limit
         .setColor(0x00CEC9)
     ]
   });
@@ -307,15 +323,17 @@ export async function handleReset(interaction) {
   const bossName = titleCase(interaction.options.getString('boss', true));
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
+  const boss = check.boss;
 
-  const ok = resetBoss(check.boss.name);
+  const ok = resetBoss(boss.name);
   if (!ok) return interaction.reply({ ephemeral: true, content: 'Failed to reset boss.' });
 
   return interaction.reply({
     embeds: [
       new EmbedBuilder()
-        .setTitle(`Reset: ${check.boss.name}`)
+        .setTitle(`Reset: ${boss.name}`)
         .setDescription('Respawn timer cleared. Status is now **Unknown**.')
+        .addFields(dropsField(boss))
         .setColor(0xE17055)
     ]
   });
@@ -362,7 +380,7 @@ export async function handleSetCommandRole(interaction) {
   return interaction.reply({ ephemeral: true, content: `Set role for /${commandName} to ${role}.` });
 }
 
-// /setalert minutes => enroll for DMs and set lead time
+// /setalert
 export async function handleSetAlert(interaction) {
   const minutes = interaction.options.getInteger('minutes', true);
   if (minutes < 1 || minutes > 1440) {

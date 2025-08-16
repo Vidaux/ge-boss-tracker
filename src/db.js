@@ -78,6 +78,8 @@ CREATE TABLE IF NOT EXISTS channel_alerts (
 );
 `);
 
+db.exec(`CREATE INDEX IF NOT EXISTS idx_bosses_name_nocase ON bosses(name COLLATE NOCASE);`);
+
 // lightweight add-columns (safe if already exist)
 for (const sql of [
   `ALTER TABLE bosses ADD COLUMN parts_json TEXT`,
@@ -143,7 +145,13 @@ export function resetBoss(bossName) {
 }
 
 export function getBossByName(bossName) {
-  const row = db.prepare(`SELECT * FROM bosses WHERE name = ?`).get(bossName);
+  const normalized = String(bossName || '').trim().replace(/\s+/g, ' ');
+  // Case-insensitive match
+  const row = db.prepare(`
+    SELECT * FROM bosses
+     WHERE name = ? COLLATE NOCASE
+  `).get(normalized);
+
   if (!row) return null;
   return {
     ...row,

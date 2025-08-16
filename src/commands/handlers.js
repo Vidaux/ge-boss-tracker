@@ -270,9 +270,6 @@ export async function handleKilled(interaction) {
   ];
 
   if (window) fields.push(renderWindowFields(updated, window));
-  if (Array.isArray(updated.parts) && updated.parts.length) {
-    fields.push({ name: 'Boss Parts', value: updated.parts.map(p => `• ${p.name}`).join('\n') });
-  }
 
   const embed = new EmbedBuilder()
     .setTitle(`Recorded Kill: ${updated.name}`)

@@ -395,6 +395,24 @@ export async function handleSetAlert(interaction) {
   return interaction.reply({ ephemeral: true, content: `Your alert lead time is now **${minutes} minutes** before window start.` });
 }
 
+// /setcommandrole — gate a command behind a specific role (admin only)
+export async function handleSetCommandRole(interaction) {
+  if (!isAdminAllowed(interaction)) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /setcommandrole.' });
+  }
+
+  const commandName = interaction.options.getString('command', true);
+  const role = interaction.options.getRole('role', true);
+
+  // Save the gate in DB
+  setCommandRole(interaction.guildId, commandName, role.id);
+
+  return interaction.reply({
+    ephemeral: true,
+    content: `Set role for **/${commandName}** to ${role}.`
+  });
+}
+
 
 // /upcoming - dynamic hours
 export async function handleUpcoming(interaction) {

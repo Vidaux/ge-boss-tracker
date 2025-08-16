@@ -94,7 +94,7 @@ function renderWindowFields(boss, window) {
 
 function dropsField(boss) {
   const drops = (boss.drops || []);
-  const value = drops.length ? drops.map(d => `• ${d}`).join('\n') : '-';
+  const value = drops.length ? drops.map(d => `• ${d}`).join('\n') : '—';
   // Discord field limit is 1024 chars; trim defensively
   return { name: 'Drops', value: value.slice(0, 1024) };
 }
@@ -270,7 +270,7 @@ export async function handleDetails(interaction) {
   if (Array.isArray(b.parts) && b.parts.length) {
     for (const part of b.parts) {
       const statsLines = Object.entries(part.stats || {}).map(([k, v]) => `**${k}**: ${v}`).join('\n') || '-';
-      fields.push({ name: `Stats - ${part.name}`, value: statsLines });
+      fields.push({ name: `Stats — ${part.name}`, value: statsLines });
     }
   } else {
     const statsLines = Object.entries(b.stats || {}).map(([k, v]) => `**${k}**: ${v}`).join('\n') || '-';
@@ -294,7 +294,7 @@ export async function handleDetails(interaction) {
   });
 }
 
-// /drops (unchanged - already dedicated to drop list)
+// /drops (unchanged — already dedicated to drop list)
 export async function handleDrops(interaction) {
   if (!isAllowedForStandard(interaction, 'drops')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /drops.' });
@@ -303,7 +303,7 @@ export async function handleDrops(interaction) {
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
   const b = check.boss;
-  const drops = (b.drops || []).map(d => `• ${d}`).join('\n') || '-';
+  const drops = (b.drops || []).map(d => `• ${d}`).join('\n') || '—';
 
   return interaction.reply({
     embeds: [

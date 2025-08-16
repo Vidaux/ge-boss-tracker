@@ -21,24 +21,13 @@ CREATE TABLE IF NOT EXISTS bosses (
   drops_json TEXT,
   respawn_notes_json TEXT,
 
-  /* legacy columns (no longer used for state; kept for compatibility) */
+  /* legacy (pre-guild) columns: keep for migration/backfill, but no longer used for state */
   last_killed_at_utc TEXT,
   window_notif_key TEXT,
   parts_json TEXT,
   reset_respawn_min_hours REAL,
   reset_respawn_max_hours REAL,
   last_trigger_kind TEXT
-);
-
-/* NEW: per-guild boss state (kill/reset timestamps etc.) */
-CREATE TABLE IF NOT EXISTS boss_state (
-  guild_id TEXT,
-  boss_name TEXT,
-  last_killed_at_utc TEXT,
-  window_notif_key TEXT,
-  last_trigger_kind TEXT,
-  PRIMARY KEY (guild_id, boss_name),
-  FOREIGN KEY (boss_name) REFERENCES bosses(name) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS guild_settings (
@@ -83,6 +72,17 @@ CREATE TABLE IF NOT EXISTS user_subscriptions (
   PRIMARY KEY (user_id, guild_id, boss_name)
 );
 
+/* Per-guild boss state (NEW) */
+CREATE TABLE IF NOT EXISTS guild_boss_state (
+  guild_id TEXT,
+  boss_name TEXT,
+  last_killed_at_utc TEXT,
+  window_notif_key TEXT,
+  last_trigger_kind TEXT,
+  PRIMARY KEY (guild_id, boss_name),
+  FOREIGN KEY (boss_name) REFERENCES bosses(name) ON DELETE CASCADE
+);
+
 /* Includes metadata for cleanup of channel messages */
 CREATE TABLE IF NOT EXISTS channel_alerts (
   guild_id TEXT,
@@ -98,8 +98,8 @@ CREATE TABLE IF NOT EXISTS channel_alerts (
 `);
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_bosses_name_nocase ON bosses(name COLLATE NOCASE);`);
-db.exec(`CREATE INDEX IF NOT EXISTS idx_boss_state_guild ON boss_state(guild_id);`);
-db.exec(`CREATE INDEX IF NOT EXISTS idx_boss_state_guild_kill ON boss_state(guild_id, last_killed_at_utc);`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_gbs_guild_boss ON guild_boss_state(guild_id, boss_name);`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_channel_alerts_due ON channel_alerts(guild_id, delete_after_utc);`);
 
 // lightweight add-columns (safe if already exist)
 for (const sql of [
@@ -111,7 +111,7 @@ for (const sql of [
   `ALTER TABLE bosses ADD COLUMN reset_respawn_min_hours REAL`,
   `ALTER TABLE bosses ADD COLUMN reset_respawn_max_hours REAL`,
   `ALTER TABLE bosses ADD COLUMN last_trigger_kind TEXT`,
-  // channel_alerts cleanup metadata (idempotent)
+  // channel_alerts cleanup metadata
   `ALTER TABLE channel_alerts ADD COLUMN channel_id TEXT`,
   `ALTER TABLE channel_alerts ADD COLUMN message_id TEXT`,
   `ALTER TABLE channel_alerts ADD COLUMN delete_after_utc TEXT`,
@@ -147,42 +147,85 @@ for (const b of bossesSeed) {
 }
 
 // --------------------------
-// Boss timers & queries (guild-scoped)
+// One-time backfill: migrate legacy global kills -> per-guild
+// --------------------------
+(function backfillGlobalKillsToGuildStateOnce() {
+  // If guild_boss_state already has rows, skip.
+  const any = db.prepare(`SELECT 1 FROM guild_boss_state LIMIT 1`).get();
+  if (any) return;
+
+  const guilds = db.prepare(`SELECT guild_id FROM guild_settings`).all();
+  if (!guilds.length) return;
+
+  const bossesWithKills = db.prepare(`
+    SELECT name, last_killed_at_utc, window_notif_key, last_trigger_kind
+    FROM bosses WHERE last_killed_at_utc IS NOT NULL
+  `).all();
+
+  if (!bossesWithKills.length) return;
+
+  const upsert = db.prepare(`
+    INSERT INTO guild_boss_state (guild_id, boss_name, last_killed_at_utc, window_notif_key, last_trigger_kind)
+    VALUES (@guild_id, @boss_name, @last_killed_at_utc, @window_notif_key, @last_trigger_kind)
+    ON CONFLICT(guild_id, boss_name) DO UPDATE SET
+      last_killed_at_utc = excluded.last_killed_at_utc,
+      window_notif_key   = excluded.window_notif_key,
+      last_trigger_kind  = excluded.last_trigger_kind
+  `);
+
+  const tx = db.transaction(() => {
+    for (const g of guilds) {
+      for (const b of bossesWithKills) {
+        upsert.run({
+          guild_id: g.guild_id,
+          boss_name: b.name,
+          last_killed_at_utc: b.last_killed_at_utc,
+          window_notif_key: b.window_notif_key ?? `${b.name}:${b.last_killed_at_utc}`,
+          last_trigger_kind: b.last_trigger_kind ?? 'death'
+        });
+      }
+    }
+    // Clear legacy global fields so they stop affecting anything
+    db.prepare(`UPDATE bosses SET last_killed_at_utc = NULL, window_notif_key = NULL, last_trigger_kind = NULL`).run();
+  });
+  tx();
+})();
+
+// --------------------------
+// Boss timers & queries (GUILD-SCOPED)
 // --------------------------
 export function setKilled(guildId, bossName, utcIsoString) {
-  const windowKey = `${bossName}:${utcIsoString}`; // guild_id is part of PK, so this is fine
-  const stmt = db.prepare(`
-    INSERT INTO boss_state (guild_id, boss_name, last_killed_at_utc, window_notif_key, last_trigger_kind)
+  const windowKey = `${bossName}:${utcIsoString}`;
+  const info = db.prepare(`
+    INSERT INTO guild_boss_state (guild_id, boss_name, last_killed_at_utc, window_notif_key, last_trigger_kind)
     VALUES (?, ?, ?, ?, 'death')
     ON CONFLICT(guild_id, boss_name) DO UPDATE SET
       last_killed_at_utc = excluded.last_killed_at_utc,
       window_notif_key   = excluded.window_notif_key,
       last_trigger_kind  = 'death'
-  `);
-  const info = stmt.run(guildId, bossName, utcIsoString, windowKey);
+  `).run(guildId, bossName, utcIsoString, windowKey);
   return info.changes > 0;
 }
 
 export function resetBoss(guildId, bossName) {
-  // Ensure row exists, then clear state
-  db.prepare(`
-    INSERT INTO boss_state (guild_id, boss_name, last_killed_at_utc, window_notif_key, last_trigger_kind)
+  const info = db.prepare(`
+    INSERT INTO guild_boss_state (guild_id, boss_name, last_killed_at_utc, window_notif_key, last_trigger_kind)
     VALUES (?, ?, NULL, NULL, NULL)
     ON CONFLICT(guild_id, boss_name) DO UPDATE SET
       last_killed_at_utc = NULL,
       window_notif_key   = NULL,
       last_trigger_kind  = NULL
   `).run(guildId, bossName);
-  return true;
+  return info.changes > 0;
 }
 
+// STATIC meta by name (no guild state)
 export function getBossByName(bossName) {
   const normalized = String(bossName || '').trim().replace(/\s+/g, ' ');
   const row = db.prepare(`
     SELECT * FROM bosses
      WHERE name = ? COLLATE NOCASE
   `).get(normalized);
-
   if (!row) return null;
   return {
     ...row,
@@ -193,104 +236,104 @@ export function getBossByName(bossName) {
   };
 }
 
-export function getBossForGuild(guildId, bossName) {
-  const base = getBossByName(bossName);
-  if (!base) return null;
-  const st = db.prepare(`
-    SELECT last_killed_at_utc, window_notif_key, last_trigger_kind
-      FROM boss_state
-     WHERE guild_id = ? AND boss_name = ? COLLATE NOCASE
-  `).get(guildId, bossName) || {};
-  return { ...base, ...st };
-}
-
+// STATIC list
 export function listBosses() {
   const rows = db.prepare(`SELECT name FROM bosses ORDER BY name`).all();
   return rows.map(r => r.name);
 }
 
-/** Guild-scoped: only names with a recorded kill in this guild */
+// GUILD-SCOPED joins
+export function getBossForGuild(guildId, bossName) {
+  const normalized = String(bossName || '').trim().replace(/\s+/g, ' ');
+  const row = db.prepare(`
+    SELECT b.*,
+           g.last_killed_at_utc,
+           g.window_notif_key,
+           g.last_trigger_kind
+      FROM bosses b
+      LEFT JOIN guild_boss_state g
+        ON g.boss_name = b.name AND g.guild_id = ?
+     WHERE b.name = ? COLLATE NOCASE
+  `).get(guildId, normalized);
+  if (!row) return null;
+  return {
+    ...row,
+    stats: JSON.parse(row.stats_json || '{}'),
+    drops: JSON.parse(row.drops_json || '[]'),
+    respawn_notes: JSON.parse(row.respawn_notes_json || '[]'),
+    parts: JSON.parse(row.parts_json || 'null')
+  };
+}
+
+export function getAllBossRows() {
+  // static metadata only
+  return db.prepare(`SELECT * FROM bosses ORDER BY name`).all().map(r => ({
+    ...r,
+    stats: JSON.parse(r.stats_json || '{}'),
+    drops: JSON.parse(r.drops_json || '[]'),
+    respawn_notes: JSON.parse(r.respawn_notes_json || '[]'),
+    parts: JSON.parse(r.parts_json || 'null')
+  }));
+}
+
+export function getAllBossRowsForGuild(guildId) {
+  return db.prepare(`
+    SELECT b.*,
+           g.last_killed_at_utc,
+           g.window_notif_key,
+           g.last_trigger_kind
+      FROM bosses b
+      LEFT JOIN guild_boss_state g
+        ON g.boss_name = b.name AND g.guild_id = ?
+     ORDER BY b.name
+  `).all(guildId).map(r => ({
+    ...r,
+    stats: JSON.parse(r.stats_json || '{}'),
+    drops: JSON.parse(r.drops_json || '[]'),
+    respawn_notes: JSON.parse(r.respawn_notes_json || '[]'),
+    parts: JSON.parse(r.parts_json || 'null')
+  }));
+}
+
 export function listKilledBosses(guildId) {
   const rows = db.prepare(`
-    SELECT boss_name AS name
-      FROM boss_state
-     WHERE guild_id = ?
-       AND last_killed_at_utc IS NOT NULL
+    SELECT boss_name FROM guild_boss_state
+     WHERE guild_id = ? AND last_killed_at_utc IS NOT NULL
      ORDER BY boss_name
   `).all(guildId);
-  return rows.map(r => r.name);
-}
-
-/** Static metadata only (no guild state) */
-export function getAllBossRows() {
-  return db.prepare(`SELECT * FROM bosses`).all().map(r => ({
-    ...r,
-    stats: JSON.parse(r.stats_json || '{}'),
-    drops: JSON.parse(r.drops_json || '[]'),
-    respawn_notes: JSON.parse(r.respawn_notes_json || '[]'),
-    parts: JSON.parse(r.parts_json || 'null')
-  }));
-}
-
-/** Guild-scoped merged rows: static metadata + this guild's state */
-export function getAllBossRowsForGuild(guildId) {
-  const rows = db.prepare(`
-    SELECT b.*,
-           s.last_killed_at_utc,
-           s.window_notif_key,
-           s.last_trigger_kind
-      FROM bosses b
- LEFT JOIN boss_state s
-        ON s.boss_name = b.name
-       AND s.guild_id = ?
-  `).all(guildId);
-
-  return rows.map(r => ({
-    ...r,
-    stats: JSON.parse(r.stats_json || '{}'),
-    drops: JSON.parse(r.drops_json || '[]'),
-    respawn_notes: JSON.parse(r.respawn_notes_json || '[]'),
-    parts: JSON.parse(r.parts_json || 'null')
-  }));
+  return rows.map(r => r.boss_name);
 }
 
 /**
- * Compute the active window.
- * - If last_trigger_kind === 'reset' and reset_respawn_* exist, use those.
- * - Else, if standard respawn_min/max exist, use them.
- * - Else, return null (untracked boss).
+ * Compute the active window from a row (which may include reset respawns).
+ * Row should have: last_killed_at_utc, last_trigger_kind, respawn_min/max, reset_respawn_min/max.
  */
 export function computeWindow(row) {
   if (!row?.last_killed_at_utc) return null;
 
-  const killed = DateTime.fromISO(row.last_killed_at_utc, { zone: 'utc' });
+  const base = DateTime.fromISO(row.last_killed_at_utc, { zone: 'utc' });
 
-  // Prefer reset-based window when last trigger was a server reset
   if (
     row.last_trigger_kind === 'reset' &&
     row.reset_respawn_min_hours != null &&
     row.reset_respawn_max_hours != null
   ) {
-    const start = killed.plus({ hours: Number(row.reset_respawn_min_hours) });
-    const end   = killed.plus({ hours: Number(row.reset_respawn_max_hours) });
-    return { start, end, killed, trigger: 'reset' };
+    const start = base.plus({ hours: Number(row.reset_respawn_min_hours) });
+    const end   = base.plus({ hours: Number(row.reset_respawn_max_hours) });
+    return { start, end, killed: base, trigger: 'reset' };
   }
 
-  // Fall back to normal (death-based) window if configured
   if (row.respawn_min_hours != null && row.respawn_max_hours != null) {
-    const start = killed.plus({ hours: Number(row.respawn_min_hours) });
-    const end   = killed.plus({ hours: Number(row.respawn_max_hours) });
-    return { start, end, killed, trigger: 'death' };
+    const start = base.plus({ hours: Number(row.respawn_min_hours) });
+    const end   = base.plus({ hours: Number(row.respawn_max_hours) });
+    return { start, end, killed: base, trigger: 'death' };
   }
 
-  // Untracked/static boss
   return null;
 }
 
 /**
- * Apply a server reset at the given ISO timestamp for THIS guild only.
- * For all bosses that have reset_respawn_min/max set (not null),
- * set last_killed_at_utc to the reset time and mark last_trigger_kind = 'reset'.
+ * Apply a server reset for a single guild.
  */
 export function applyServerReset(guildId, utcIsoString) {
   const eligible = db.prepare(`
@@ -299,8 +342,8 @@ export function applyServerReset(guildId, utcIsoString) {
        AND reset_respawn_max_hours IS NOT NULL
   `).all();
 
-  const update = db.prepare(`
-    INSERT INTO boss_state (guild_id, boss_name, last_killed_at_utc, window_notif_key, last_trigger_kind)
+  const upsert = db.prepare(`
+    INSERT INTO guild_boss_state (guild_id, boss_name, last_killed_at_utc, window_notif_key, last_trigger_kind)
     VALUES (?, ?, ?, ?, 'reset')
     ON CONFLICT(guild_id, boss_name) DO UPDATE SET
       last_killed_at_utc = excluded.last_killed_at_utc,
@@ -309,11 +352,14 @@ export function applyServerReset(guildId, utcIsoString) {
   `);
 
   const updatedNames = [];
-  for (const r of eligible) {
-    const key = `${r.name}:${utcIsoString}`;
-    const info = update.run(guildId, r.name, utcIsoString, key);
-    if (info.changes > 0) updatedNames.push(r.name);
-  }
+  const tx = db.transaction(() => {
+    for (const r of eligible) {
+      const key = `${r.name}:${utcIsoString}`;
+      const info = upsert.run(guildId, r.name, utcIsoString, key);
+      if (info.changes > 0) updatedNames.push(r.name);
+    }
+  });
+  tx();
   return { updatedNames };
 }
 
@@ -490,13 +536,17 @@ export function markChannelPinged(guildId, bossName, windowKey) {
   `).run(guildId, bossName, windowKey);
 }
 
+// Has this guild already been pinged for this boss+window?
 export function hasChannelBeenPinged(guildId, bossName, windowKey) {
   const row = db.prepare(`
-    SELECT pinged FROM channel_alerts WHERE guild_id = ? AND boss_name = ? AND window_key = ?
+    SELECT pinged
+      FROM channel_alerts
+     WHERE guild_id = ? AND boss_name = ? AND window_key = ?
   `).get(guildId, bossName, windowKey);
   return !!row?.pinged;
 }
 
+/** Store the message so it can be deleted later */
 export function recordChannelPingMessage(guildId, bossName, windowKey, channelId, messageId, deleteAfterIso) {
   db.prepare(`
     INSERT INTO channel_alerts (guild_id, boss_name, window_key, pinged, channel_id, message_id, delete_after_utc, deleted)
@@ -510,6 +560,7 @@ export function recordChannelPingMessage(guildId, bossName, windowKey, channelId
   `).run(guildId, bossName, windowKey, channelId, messageId, deleteAfterIso);
 }
 
+/** Find messages that are due to be deleted now (or earlier) */
 export function listChannelMessagesDueForDeletion(guildId, nowIso) {
   return db.prepare(`
     SELECT guild_id, boss_name, window_key, channel_id, message_id
@@ -523,6 +574,7 @@ export function listChannelMessagesDueForDeletion(guildId, nowIso) {
   `).all(guildId, nowIso);
 }
 
+/** Mark a channel alert row as deleted (so we don't try again) */
 export function markChannelAlertDeleted(guildId, bossName, windowKey) {
   db.prepare(`
     UPDATE channel_alerts

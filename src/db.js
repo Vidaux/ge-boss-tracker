@@ -168,6 +168,30 @@ for (const b of bossesSeed) {
   for (const row of entries) insertBoss.run(row);
 }
 
+// --- Cleanup: remove stale base-name rows for multi-location bosses ---
+// Any boss in the seed that has >1 location should NOT have a base row anymore.
+try {
+  const multiBaseNames = bossesSeed
+    .filter(b => {
+      // Same splitter used in seeding
+      const asLocationArray = (loc) => {
+        if (Array.isArray(loc)) return loc.map(s => String(s).trim()).filter(Boolean);
+        const raw = String(loc || '').trim();
+        if (!raw) return [];
+        return raw.split('|').map(s => s.trim()).filter(Boolean);
+      };
+      return asLocationArray(b.location).length > 1;
+    })
+    .map(b => b.name);
+
+  const delStmt = db.prepare(`DELETE FROM bosses WHERE name = ? COLLATE NOCASE`);
+  for (const base of multiBaseNames) {
+    delStmt.run(base);
+  }
+} catch (e) {
+  // Non-fatal: if anything goes wrong, we just keep going
+}
+
 
 // --------------------------
 // One-time backfill: migrate legacy global kills -> per-guild

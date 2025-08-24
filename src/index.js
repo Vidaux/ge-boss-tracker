@@ -628,7 +628,7 @@ bus.on('forceUpdate', (payload) => {
   tickOnce(gid).catch(() => {});
 });
 
-// Keep it — event-driven stale cleanup
+// Keep it - event-driven stale cleanup
 bus.on('cleanupStaleApproaching', (payload) => {
   const guildId = payload?.guildId;
   if (!guildId) return;

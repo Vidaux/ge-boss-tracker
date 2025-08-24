@@ -652,13 +652,13 @@ export async function handlePlayerLookup(interaction) {
     { name: 'Jormongand Belt', value: p.has_belt ? 'Have' : 'Need', inline: true },
     { name: 'Montoro Skull Ring', value: p.has_ring ? 'Have' : 'Need', inline: true },
     { name: 'Keys Used', value: String(p.used_key_count || 0), inline: true },
-    { name: 'Queue Position', value: p.has_belt ? '— (has belt)' : (p.queue_order ? `#${p.queue_order}` : '—'), inline: true }
+    { name: 'Queue Position', value: p.has_belt ? '- (has belt)' : (p.queue_order ? `#${p.queue_order}` : '-'), inline: true }
   ];
 
   const armorFields = [
-    { name: 'MCC1', value: p.mcc1 ?? '—', inline: true },
-    { name: 'MCC2', value: p.mcc2 ?? '—', inline: true },
-    { name: 'MCC3', value: p.mcc3 ?? '—', inline: true }
+    { name: 'MCC1', value: p.mcc1 ?? '-', inline: true },
+    { name: 'MCC2', value: p.mcc2 ?? '-', inline: true },
+    { name: 'MCC3', value: p.mcc3 ?? '-', inline: true }
   ];
 
   const embed = new EmbedBuilder()

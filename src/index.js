@@ -24,7 +24,10 @@ import {
   handleSetup,
   handleSetCommandRole,
   handleSetAlert,
-  handleServerReset
+  handleServerReset,
+  handleJormAddPlayer,
+  handleJormUpdatePlayer,
+  handleJormRefresh
 } from './commands/handlers.js';
 
 import {
@@ -33,16 +36,20 @@ import {
   upsertGuildSettings,
   getAllGuildSettings,
   getAllBossRows,              // static metadata (used for autocomplete filtering)
-  getAllBossRowsForGuild,      // NEW: guild-scoped state + metadata
+  getAllBossRowsForGuild,      // guild-scoped state + metadata
   computeWindow,
   hasChannelBeenPinged,
   listRegisteredUsers,
   hasUserBeenAlerted,
   markUserAlerted,
-  listKilledBosses,            // now guild-scoped
+  listKilledBosses,            // guild-scoped
   recordChannelPingMessage,
   listChannelMessagesDueForDeletion,
-  markChannelAlertDeleted
+  markChannelAlertDeleted,
+  listJormQueue,
+  listJormPlayersWithoutRing,
+  jormRotate,
+  jormUndo
 } from './db.js';
 
 import { nowUtc, fmtUtc, toUnixSeconds } from './utils/time.js';
@@ -119,6 +126,76 @@ function buildUpcomingEmbedForGuild(hours, guildId) {
     .setColor(0x00A8FF);
 }
 
+// --------- Jorm embeds ----------
+function buildJormQueueEmbed(guildId) {
+  const queue = listJormQueue(guildId);
+  const lines = queue.length
+    ? queue.map((q, i) => `${i + 1}. <@${q.user_id}> ${q.used_key_count ? `(used: ${q.used_key_count})` : ''}`)
+    : ['(no eligible players - everyone has a belt)'];
+
+  return new EmbedBuilder()
+    .setTitle('Jorm Key Queue')
+    .setDescription(lines.join('\n'))
+    .setColor(0x3498DB);
+}
+
+function buildJormRingEmbed(guildId) {
+  const rows = listJormPlayersWithoutRing(guildId);
+  const lines = rows.length
+    ? rows.map(r => `• <@${r.user_id}>`)
+    : ['(everyone has a ring)'];
+
+  return new EmbedBuilder()
+    .setTitle('Ring FW List (No Montoro Skull Ring)')
+    .setDescription(lines.join('\n'))
+    .setColor(0x9B59B6);
+}
+
+async function renderOrCreateJormMessages(guildId, { forceCreate = false } = {}) {
+  const gs = getGuildSettings(guildId) || {};
+  if (!gs.jorm_channel_id) return;
+
+  const guild = await client.guilds.fetch(guildId).catch(() => null);
+  if (!guild) return;
+  const channel = await guild.channels.fetch(gs.jorm_channel_id).catch(() => null);
+  if (!channel) return;
+
+  const queueEmbed = buildJormQueueEmbed(guildId);
+  const ringEmbed = buildJormRingEmbed(guildId);
+
+  let queueMsg = null, ringMsg = null;
+
+  if (gs.jorm_queue_message_id && !forceCreate) {
+    queueMsg = await channel.messages.fetch(gs.jorm_queue_message_id).catch(() => null);
+  }
+  if (gs.jorm_ring_message_id && !forceCreate) {
+    ringMsg = await channel.messages.fetch(gs.jorm_ring_message_id).catch(() => null);
+  }
+
+  const components = [{
+    type: 1, // ActionRow
+    components: [
+      { type: 2, style: 3, custom_id: 'jorm:used',    label: 'Used Key' },
+      { type: 2, style: 2, custom_id: 'jorm:skipped', label: 'Skipped' },
+      { type: 2, style: 1, custom_id: 'jorm:undo',    label: 'Undo' }
+    ]
+  }];
+
+  if (queueMsg) {
+    await queueMsg.edit({ embeds: [queueEmbed], components });
+  } else {
+    queueMsg = await channel.send({ embeds: [queueEmbed], components });
+    upsertGuildSettings(guildId, { jorm_queue_message_id: queueMsg.id });
+  }
+
+  if (ringMsg) {
+    await ringMsg.edit({ embeds: [ringEmbed], components: [] });
+  } else {
+    ringMsg = await channel.send({ embeds: [ringEmbed] });
+    upsertGuildSettings(guildId, { jorm_ring_message_id: ringMsg.id });
+  }
+}
+
 // Ready
 client.once(Events.ClientReady, (c) => {
   console.log(`✅ Logged in as ${c.user.tag}`);
@@ -181,6 +258,33 @@ client.on(Events.InteractionCreate, async (interaction) => {
     ? interaction.member.roles.cache.has(gs.admin_role_id)
     : interaction.member.permissions.has('ManageGuild');
 
+  // Jorm buttons (live message controls)
+  if (interaction.isButton() && interaction.customId?.startsWith('jorm:')) {
+    if (!isAdmin && !isAllowedByStandardForJorm(interaction)) {
+      return interaction.reply({ ephemeral: true, content: 'You do not have permission to use these controls.' });
+    }
+    try {
+      const sub = interaction.customId.split(':')[1];
+      if (sub === 'used' || sub === 'skipped') {
+        jormRotate(interaction.guildId, sub);
+        await renderOrCreateJormMessages(interaction.guildId);
+        return interaction.reply({
+          ephemeral: true,
+          content: sub === 'used' ? 'Marked top of queue as **Used Key** and rotated.' : 'Marked as **Skipped** and rotated.'
+        });
+      }
+      if (sub === 'undo') {
+        const res = jormUndo(interaction.guildId);
+        await renderOrCreateJormMessages(interaction.guildId);
+        return interaction.reply({ ephemeral: true, content: res.undone ? 'Last action undone.' : 'Nothing to undo.' });
+      }
+    } catch (e) {
+      console.error('Jorm button error:', e);
+      return interaction.reply({ ephemeral: true, content: 'Error handling that action.' });
+    }
+    return;
+  }
+
   if (!isAdmin) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use the setup wizard.' });
   }
@@ -207,6 +311,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.customId === 'setup:minutes' && interaction.isStringSelectMenu()) {
       const minutes = parseInt(interaction.values[0], 10);
       upsertGuildSettings(interaction.guildId, { ping_minutes: minutes });
+      return interaction.deferUpdate();
+    }
+
+    // NEW: Jorm messages channel
+    if (interaction.customId === 'setup:jorm_channel' && interaction.isChannelSelectMenu()) {
+      const ch = interaction.channels.first();
+      upsertGuildSettings(interaction.guildId, { jorm_channel_id: ch?.id ?? null });
       return interaction.deferUpdate();
     }
 
@@ -257,6 +368,32 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       return;
     }
+
+    // NEW: Create/Update Jorm messages
+    if (interaction.customId === 'setup:make_jorm' && interaction.isButton()) {
+      const settings = getGuildSettings(interaction.guildId) || {};
+      if (!settings.jorm_channel_id) {
+        return interaction.update({
+          content: '❗ Select a **Jorm Messages Channel** first in the menus above.',
+          embeds: [],
+          components: []
+        });
+      }
+
+      await renderOrCreateJormMessages(interaction.guildId, { forceCreate: true });
+
+      await interaction.update({
+        content: '✅ Jorm Queue & Ring FW messages created/updated.',
+        embeds: [],
+        components: []
+      });
+
+      setTimeout(() => {
+        interaction.deleteReply().catch(() => {});
+      }, 3000);
+
+      return;
+    }
   } catch (err) {
     console.error('Setup component error:', err);
     if (!interaction.deferred && !interaction.replied) {
@@ -264,6 +401,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
   }
 });
+
+// Helper: allow non-admins to press Jorm buttons if you gate /jorm via setcommandrole
+function isAllowedByStandardForJorm(interaction) {
+  // Reuse your role-gating setup by checking the 'jorm' command name
+  const gs = getGuildSettings(interaction.guildId);
+  // If jorm is gated, only that role (or admin) can use buttons; otherwise anyone can
+  // This lightweight check mirrors isAllowedForStandard in handlers:
+  const explicitRoleRow = null; // buttons aren't tied to a slash handler; keep open unless you prefer strict gating here
+  const roleToCheck = explicitRoleRow || gs?.standard_role_id;
+  if (!roleToCheck) return true;
+  return interaction.member.roles.cache.has(roleToCheck);
+}
 
 // --------- Slash command router ----------
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -297,6 +446,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
       case 'setup':           await handleSetup(interaction); break;
       case 'setcommandrole':  await handleSetCommandRole(interaction); break;
       case 'setalert':        await handleSetAlert(interaction); break;
+      case 'jorm': {
+        const sub = interaction.options.getSubcommand();
+        if (sub === 'addplayer')        await handleJormAddPlayer(interaction);
+        else if (sub === 'updateplayer') await handleJormUpdatePlayer(interaction);
+        else if (sub === 'refresh')     await handleJormRefresh(interaction);
+        else await interaction.reply({ ephemeral: true, content: 'Unknown /jorm subcommand.' });
+        break;
+      }
       default:
         await interaction.reply({ ephemeral: true, content: 'Unknown command.' });
     }
@@ -331,7 +488,6 @@ async function cleanupStaleApproachingMessages(guildId, bossNames) {
   }
 
   // Fetch a chunk of recent messages and remove outdated “Spawn Approaching - <boss>”
-  // (If you want a deeper sweep, you can loop with { before: lastId }.)
   const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
   if (!recent) return;
 
@@ -363,8 +519,7 @@ async function cleanupStaleApproachingMessages(guildId, bossNames) {
       }
       if (!isCurrent) {
         await msg.delete().catch(() => {});
-        // We intentionally do not mark the DB row as deleted here; the time-based
-        // cleanup will mark it when it comes due even if the message is already gone.
+        // time-based cleanup will mark deleted later if present in DB
       }
     }
   }
@@ -551,6 +706,13 @@ bus.on('cleanupStaleApproaching', (payload) => {
     : (payload?.bossName ? [payload.bossName] : []);
   if (!names.length) return;
   cleanupStaleApproachingMessages(guildId, names).catch(() => {});
+});
+
+// NEW: keep Jorm messages fresh
+bus.on('jormUpdate', (payload) => {
+  const gid = payload?.guildId;
+  if (!gid) return;
+  renderOrCreateJormMessages(gid, { forceCreate: !!payload.forceCreate }).catch(() => {});
 });
 
 process.on('unhandledRejection', (err) => {

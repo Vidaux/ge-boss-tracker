@@ -1,6 +1,6 @@
 # GE Boss Tracker
 
-Tracks **Granado Espada** boss respawn windows. Uses **UTC internally** and Discord **timestamp formatting** so each user sees the correct local time automatically. Includes a live **Upcoming Spawns dashboard**, optional **role pings**, **DM alerts**, and **automatic cleanup** of stale alerts.
+Tracks **Granado Espada** boss respawn windows. Uses **UTC internally** and Discord **timestamp formatting** so each user sees the correct local time automatically. Includes a live **Upcoming Spawns dashboard**, optional **role pings** before windows open, and **Jormongand player tracking**.
 
 > Built with **Node 20+**, **discord.js v14**, **SQLite**.
 
@@ -10,26 +10,26 @@ Tracks **Granado Espada** boss respawn windows. Uses **UTC internally** and Disc
 
 - **UTC-based** timers; embeds show both **Server Time (UTC)** and **Your Time** (`<t:...>`).
 - Clean, consistent embeds (no relative times in `/status`, `/killed`, `/upcoming`).
-- **Per-Guild timers & state** ✨  
-  Boss kill times and windows are stored **per Discord guild**, so multiple servers can track independently.
-- **Reset-aware respawns** ✨  
-  Supports alternative **reset respawn windows** when timers are driven by a server reset.
-- **Multi-part bosses** (e.g., *Rafflesia*, *Argus*) tracked as **one boss** (single timer). Parts and stats appear in `/details`.
+- **Multi-part bosses** (e.g., *Rafflesia*, *Argus*) are tracked as **one boss** (single timer). Parts and their stats appear in `/details`.
+- **Multi-location bosses**: if a boss has multiple locations, each location becomes its **own entry** (e.g., `Swamp Angler - Bahamar Dark Swamp`, `Swamp Angler - Bahamar Swamp of Peril`).
 - **Subscriptions & DMs** (opt-in):
-  - `/subscribe boss|all` / `/unsubscribe boss|all`
-  - Default **30 min** lead time set on first subscribe; adjust with `/setalert`.
-  - `/unsubscribe boss` autocomplete shows **only bosses you’re subscribed to**.
-  - `/subscriptions` lists your current subscriptions.
+    - `/subscribe boss|all` / `/unsubscribe boss|all`
+    - Default **30 min** alert lead time is set on a user’s first subscribe; adjustable with `/setalert`.
+    - `/unsubscribe boss` autocomplete shows **only bosses you’re subscribed to**.
+    - `/subscriptions` lists your current subscriptions.
 - **Upcoming dashboard** (auto-updated):
-  - Shows **all respawn windows starting within N hours** (default **3h**). Already-open windows count as “now” and are sorted earliest first.
-  - Optional **role ping** X minutes before a window opens (one ping per boss window).
-  - Configurable via a **wizard-style `/setup`** with dropdowns & button.
-  - **Instant refresh** whenever timers change (via `/killed`, `/reset`, `/serverreset`).
-- **Stale alert cleanup** ✨
-  - **Event-driven:** If a boss window changes (new kill or server reset), any outdated **“Spawn Approaching – <boss>”** messages in the alert channel are **deleted immediately**.
-  - **Time-based:** “Spawn Approaching” messages also **auto-delete 30 minutes after window end**.
-- **Role gating**: `/setcommandrole` can restrict any standard command to a role.
-- Lightweight scheduler (ticks every minute).
+    - Shows all windows that **start within N hours** (default **3**).
+    - Optional **role ping** X minutes before a window opens.
+    - Configurable via **wizard-style `/setup`** with dropdowns & a button.
+    - **Instant refresh** whenever `/killed` or `/reset` or `/serverreset` runs.
+    - **Stale alert cleanup**: if a boss window changes (kill/reset), any “Spawn Approaching” pings for the old window are removed.
+- **Role gating**: `/setcommandrole` can restrict any standard command (including `/jorm`) to a role.
+- **Jormongand player tracking (per-server)**:
+    - Track who has **Jormongand Belt** and **Montoro Skull Ring**.
+    - **Jorm Key Queue**: rotating queue of players without a belt. Buttons: **Used Key**, **Skipped**, **Undo**.
+    - **Ring FW List**: players who **do not** have a Montoro Skull Ring.
+    - Configure a channel in `/setup` and click **Create/Update Jorm Messages**.
+- Lightweight scheduler (ticks every minute; configurable).
 
 ---
 
@@ -38,33 +38,31 @@ Tracks **Granado Espada** boss respawn windows. Uses **UTC internally** and Disc
 ### Player-Facing
 
 - `/killed <boss> [server_time_hhmm]`  
-  Record a kill in **UTC**. If time is omitted, uses **now (UTC)**. If provided as `HH:MM` and that time is still in the future **today** (UTC), it assumes **yesterday**.  
-  *(Per-guild; only changes the current server’s data.)*
+  Record a kill in **UTC**. If time is omitted, uses **now (UTC)**. If provided as `HH:MM` and that time is still in the future **today** (UTC), it assumes **yesterday**.
 
 - `/status <boss>`  
   Shows:
-  - **Last Death** (or **Last Server Reset** when applicable) – Your Time / Server Time (UTC)
-  - **Respawn Window/Time** – Your Time(s) / Server Time (UTC)  
-    *(If `min==max`, shows a single **Respawn Time**.)*
+    - **Last Death** or **Last Server Reset** – Your Time / Server Time (UTC)
+    - **Respawn Window/Time** – Your Time(s) / Server Time (UTC)
 
 - `/details <boss>`  
-  Location, respawn pattern (+optional reset window), special conditions, **stats** (per-part when applicable), notes.
+  Location, respawn pattern, special conditions, **stats** (per-part when applicable), optional notes.
 
 - `/drops <boss>`  
   Drop list.
 
 - `/upcoming [hours]`  
-  Shows **all** windows that **start within `hours`** (default **3**). Already-open windows are included and the list is sorted by the soonest relevant time.
+  Upcoming spawns: shows all windows starting within `hours` (default **3**).
 
 - `/listbosses`  
-  Lists all known bosses (canonical names; **boss parts are not listed**).
+  Lists all known bosses (canonical names; if multi-location, names are `Boss - Location`).
 
 - `/subscribe boss <boss>` / `/subscribe all`  
   Subscribe to DM alerts (defaults your lead time to **30 min** if you don’t have one yet).
 
 - `/unsubscribe boss <boss>` / `/unsubscribe all`  
   Unsubscribe from one or all bosses.  
-  *(Autocomplete for `/unsubscribe boss` suggests **only your subscriptions**.)*
+  *(Autocomplete for `/unsubscribe boss` only suggests bosses you’re subscribed to.)*
 
 - `/subscriptions`  
   Shows your current subscriptions.
@@ -73,24 +71,34 @@ Tracks **Granado Espada** boss respawn windows. Uses **UTC internally** and Disc
   Sets **your** lead time before window start (1–1440).
   > This **does not** enroll you; you must `/subscribe` to receive DMs.
 
+### Jormongand Tracking
+
+- `/jorm addplayer <user> [belt] [ring]` – add a player to the Jorm list (flags default to `false` if omitted).
+- `/jorm updateplayer <user> [belt] [ring]` – update belt/ring flags; updates the queue and ring list automatically.
+- `/jorm refresh` *(admin)* – (re)post/refresh the **Jorm Key Queue** and **Ring FW List** messages in the configured channel.
+
+The **Jorm Key Queue** shows only players with **Belt = false**; top → bottom rotation:
+- **Used Key**: increments their used count and moves them to the bottom.
+- **Skipped**: moves them to the bottom without incrementing.
+- **Undo**: restores the previous ordering and reverts the last “Used” count (if any).
+
 ### Admin
 
 - `/setup` - **Wizard** (no args)  
   Interactive embed with dropdowns to configure:
-  1) **Alert Channel** (dashboard & pings)
-  2) **Ping Role** (optional)
-  3) **Dashboard Lookahead Hours**
-  4) **Ping Lead Minutes**  
-     Then click **Create/Update Dashboard Message** to post or refresh the dashboard.  
-     *Dropdown picks save silently; the wizard dismisses after creating/updating.*
+    1) **Alert Channel** (dashboard & pings)
+    2) **Ping Role** (optional)
+    3) **Dashboard Lookahead Hours**
+    4) **Ping Lead Minutes**
+    5) **Jorm Messages Channel**  
+       Then click **Create/Update Dashboard Message** and/or **Create/Update Jorm Messages**.  
+       *Selections save silently; the wizard reply is dismissed after creating/updating messages.*
 
 - `/reset <boss>`  
-  Clear the timer for a boss **in this guild** (status becomes **Unknown**).  
-  **Triggers:** instant dashboard refresh **and** stale “Spawn Approaching” cleanup.
+  Clear the timer (sets status to **Unknown**). *(Forces a dashboard refresh and cleans stale alerts.)*
 
 - `/serverreset [server_time_hhmm]`  
-  Apply a **server reset** time for this guild and recalculate windows for bosses that use **reset-based respawns**.  
-  **Triggers:** instant dashboard refresh **and** stale “Spawn Approaching” cleanup for all affected bosses.
+  Apply a server reset to all reset-based bosses (uses UTC now if omitted). *(Forces refresh + stale alert cleanup.)*
 
 - `/setcommandrole <command> <role>`  
   Gate a command behind a role (otherwise anyone can use it).
@@ -101,18 +109,16 @@ Tracks **Granado Espada** boss respawn windows. Uses **UTC internally** and Disc
 
 - The bot checks timers **every minute**.
 - For each boss with a known last-death/reset time, it computes the respawn window in **UTC**.
-- Subscribed users receive a **DM** **~lead minutes** **before window start** (lead minutes set via `/setalert`).
+- Subscribed users receive a **DM** **~lead minutes** **before the window start** (lead minutes set via `/setalert`).
 - **Opt-in model**: users must `/subscribe` (boss or all). If no one subscribes to a boss, no DMs are sent.
 
 ---
 
-## Upcoming Dashboard, Pings & Cleanup
+## Upcoming Dashboard & Role Pings
 
-- The dashboard message (single message in your alert channel) is **auto-updated every minute** based on your **lookahead hours**.
+- The dashboard message (single message in your alert channel) is **auto-updated every minute** to show upcoming spawns for your configured **lookahead hours**.
 - If a **ping role** and **lead minutes** are set in `/setup`, the bot **@mentions the role** once when a window is within the lead time.
-- **Cleanup behavior:**
-  - When a timer changes (new `/killed`, `/reset`, `/serverreset`), the bot **immediately removes** any **out-of-date** “Spawn Approaching – <boss>” messages for that boss.
-  - Regardless, any “Spawn Approaching” messages **expire** and are **deleted 30 minutes after** the window ends.
+- **Stale cleanup**: If a boss window changes due to `/killed` or `/serverreset`, old “Spawn Approaching” alerts are removed.
 - Ensure the bot can send messages in the channel and can mention the chosen role (make role “mentionable” or grant permission).
 
 ---
@@ -125,8 +131,6 @@ cd /opt
 git clone <your-repo-url> ge-boss-tracker
 cd ge-boss-tracker
 npm ci
-
-
 ```
 2) **Create .env**
 ```bash

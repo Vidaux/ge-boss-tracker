@@ -1,3 +1,4 @@
+// src/commands/handlers.js
 import {
   getBossByName,
   listBosses,
@@ -15,10 +16,12 @@ import {
   getUserRegistration,
   removeSubscription,
   getAllBossRows,
-  getAllBossRowsForGuild,   // NEW
-  getBossForGuild,          // NEW
+  getAllBossRowsForGuild,   // guild
+  getBossForGuild,          // guild
   applyServerReset,
-  listKilledBosses
+  listKilledBosses,
+  upsertJormPlayer,
+  updateJormPlayer
 } from '../db.js';
 
 import {
@@ -112,7 +115,6 @@ function guardUntrackedForCommand(boss, cmdName) {
 }
 
 function renderWindowFields(boss, window) {
-  // For display purposes, prefer reset min/max when the window was triggered by server reset
   const min = Number(
     window.trigger === 'reset' && boss.reset_respawn_min_hours != null
       ? boss.reset_respawn_min_hours
@@ -152,18 +154,16 @@ function buildUpcomingEmbedForGuild(hours, guildId) {
   const now = nowUtc();
   const horizon = now.plus({ hours });
 
-  // Collect ONLY bosses whose window START is within the next N hours
   const within = [];
   for (const b of rows) {
     if (!b.last_killed_at_utc) continue;
     const w = computeWindow(b);
     if (!w) continue;
-    if (w.end <= now) continue;            // skip already closed windows
-    if (w.start > horizon) continue;       // starts after the horizon → exclude
+    if (w.end <= now) continue;
+    if (w.start > horizon) continue;
     within.push({ boss: b, window: w });
   }
 
-  // Sort by the next relevant time (already-open windows count as "now")
   within.sort((a, b) => {
     const aKey = (a.window.start < now ? now : a.window.start).toMillis();
     const bKey = (b.window.start < now ? now : b.window.start).toMillis();
@@ -218,7 +218,6 @@ export async function handleKilled(interaction) {
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
   const bossMeta = check.boss;
 
-  // Untracked bosses cannot use /killed
   const guardMsg = guardUntrackedForCommand(bossMeta, 'killed');
   if (guardMsg) return interaction.reply({ ephemeral: true, content: guardMsg });
 
@@ -314,10 +313,8 @@ export async function handleStatus(interaction) {
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
 
-  // Fetch guild-scoped state for this boss
   const boss = getBossForGuild(interaction.guildId, check.boss.name);
 
-  // Untracked bosses cannot use /status
   const guardMsg = guardUntrackedForCommand(boss, 'status');
   if (guardMsg) return interaction.reply({ ephemeral: true, content: guardMsg });
 
@@ -412,10 +409,8 @@ export async function handleReset(interaction) {
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
 
-  // Use guild-scoped state to verify existence of a recorded kill
   const bossRow = getBossForGuild(interaction.guildId, check.boss.name);
 
-  // Untracked bosses cannot be reset
   const guardMsg = guardUntrackedForCommand(bossRow, 'reset');
   if (guardMsg) return interaction.reply({ ephemeral: true, content: guardMsg });
 
@@ -446,7 +441,6 @@ export async function handleSubscribeBoss(interaction) {
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
 
-  // Untracked bosses cannot be subscribed
   const guardMsg = guardUntrackedForCommand(check.boss, 'subscribe');
   if (guardMsg) return interaction.reply({ ephemeral: true, content: guardMsg });
 
@@ -470,7 +464,6 @@ export async function handleSubscribeAll(interaction) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /subscribe.' });
   }
 
-  // Only subscribe to tracked bosses (static)
   const tracked = getAllBossRows()
     .filter(b => !isUntrackedBoss(b))
     .map(b => b.name);
@@ -495,7 +488,6 @@ export async function handleUnsubscribeBoss(interaction) {
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
 
-  // Block using this command for untracked bosses too
   const guardMsg = guardUntrackedForCommand(check.boss, 'unsubscribe');
   if (guardMsg) return interaction.reply({ ephemeral: true, content: guardMsg });
 
@@ -592,14 +584,16 @@ export async function handleSetup(interaction) {
       '2) **Ping Role** to mention when a window is near',
       '3) **Lookahead Hours** for the dashboard',
       '4) **Ping Lead Minutes** before a window opens',
+      '5) **Jorm Messages Channel** for Queue & Ring lists',
       '',
-      'Click **Create/Update Dashboard Message** when you’re done.'
+      'Click **Create/Update Dashboard Message** and/or **Create/Update Jorm Messages** when you’re done.'
     ].join('\n'))
     .addFields(
       { name: 'Current Alert Channel', value: gs.alert_channel_id ? `<#${gs.alert_channel_id}>` : '-', inline: true },
       { name: 'Current Ping Role', value: gs.ping_role_id ? `<@&${gs.ping_role_id}>` : '-', inline: true },
       { name: 'Lookahead Hours', value: String(gs.upcoming_hours ?? 3), inline: true },
-      { name: 'Ping Lead Minutes', value: String(gs.ping_minutes ?? 30), inline: true }
+      { name: 'Ping Lead Minutes', value: String(gs.ping_minutes ?? 30), inline: true },
+      { name: 'Jorm Messages Channel', value: gs.jorm_channel_id ? `<#${gs.jorm_channel_id}>` : '-', inline: true }
     )
     .setColor(0x2ECC71);
 
@@ -637,5 +631,82 @@ export async function handleSetup(interaction) {
       .setStyle(ButtonStyle.Primary)
   );
 
-  return interaction.reply({ embeds: [emb], components: [row1, row2, row3, row4, row5], ephemeral: true });
+  // NEW: Jorm message channel + creation button
+  const rowJormChannel = new ActionRowBuilder().addComponents(
+    new ChannelSelectMenuBuilder()
+      .setCustomId('setup:jorm_channel')
+      .setPlaceholder('Select channel for Jorm Queue & Ring FW')
+      .addChannelTypes(ChannelType.GuildText)
+      .setMinValues(1).setMaxValues(1)
+  );
+  const rowJormBtn = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('setup:make_jorm')
+      .setLabel('Create/Update Jorm Messages')
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  return interaction.reply({
+    embeds: [emb],
+    components: [row1, row2, row3, row4, row5, rowJormChannel, rowJormBtn],
+    ephemeral: true
+  });
+}
+
+// ---------- Jorm commands ----------
+export async function handleJormAddPlayer(interaction) {
+  if (!isAllowedForStandard(interaction, 'jorm')) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /jorm.' });
+  }
+
+  const user = interaction.options.getUser('user', true);
+  const belt = interaction.options.getBoolean('belt', false);
+  const ring = interaction.options.getBoolean('ring', false);
+
+  upsertJormPlayer(interaction.guildId, user.id, user.tag, {
+    has_belt: belt ?? false,
+    has_ring: ring ?? false
+  });
+
+  bus.emit('jormUpdate', { guildId: interaction.guildId });
+
+  return interaction.reply({
+    ephemeral: true,
+    content: `Added/updated **${user}**. Belt: **${belt ?? false}**, Ring: **${ring ?? false}**.`
+  });
+}
+
+export async function handleJormUpdatePlayer(interaction) {
+  if (!isAllowedForStandard(interaction, 'jorm')) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /jorm.' });
+  }
+
+  const user = interaction.options.getUser('user', true);
+  const belt = interaction.options.getBoolean('belt', false);
+  const ring = interaction.options.getBoolean('ring', false);
+
+  const ok = updateJormPlayer(interaction.guildId, user.id, {
+    has_belt: belt ?? null,
+    has_ring: ring ?? null,
+    display_name: user.tag
+  });
+
+  if (!ok) {
+    return interaction.reply({ ephemeral: true, content: `Player **${user}** is not in the list. Use **/jorm addplayer** first.` });
+  }
+
+  bus.emit('jormUpdate', { guildId: interaction.guildId });
+
+  return interaction.reply({
+    ephemeral: true,
+    content: `Updated **${user}**. Belt: ${belt ?? 'no change'}, Ring: ${ring ?? 'no change'}.`
+  });
+}
+
+export async function handleJormRefresh(interaction) {
+  if (!isAdminAllowed(interaction)) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to run /jorm refresh.' });
+  }
+  bus.emit('jormUpdate', { guildId: interaction.guildId, forceCreate: true });
+  return interaction.reply({ ephemeral: true, content: 'Refreshing Jorm Queue & Ring FW messages…' });
 }

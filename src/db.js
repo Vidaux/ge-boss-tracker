@@ -38,7 +38,10 @@ CREATE TABLE IF NOT EXISTS guild_settings (
   upcoming_hours INTEGER,
   ping_role_id TEXT,
   ping_minutes INTEGER,
-  alert_message_id TEXT
+  alert_message_id TEXT,
+  jorm_channel_id TEXT,
+  jorm_queue_message_id TEXT,
+  jorm_ring_message_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS command_roles (
@@ -72,7 +75,7 @@ CREATE TABLE IF NOT EXISTS user_subscriptions (
   PRIMARY KEY (user_id, guild_id, boss_name)
 );
 
-/* Per-guild boss state (NEW) */
+/* Per-guild boss state */
 CREATE TABLE IF NOT EXISTS guild_boss_state (
   guild_id TEXT,
   boss_name TEXT,
@@ -95,11 +98,38 @@ CREATE TABLE IF NOT EXISTS channel_alerts (
   deleted INTEGER,
   PRIMARY KEY (guild_id, boss_name, window_key)
 );
+
+/* Jorm tracking */
+CREATE TABLE IF NOT EXISTS jorm_players (
+  guild_id TEXT,
+  user_id TEXT,
+  display_name TEXT,
+  has_belt INTEGER NOT NULL DEFAULT 0,
+  has_ring INTEGER NOT NULL DEFAULT 0,
+  used_key_count INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (guild_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS jorm_queue (
+  guild_id TEXT,
+  user_id TEXT,
+  position INTEGER NOT NULL,
+  PRIMARY KEY (guild_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS jorm_undo (
+  guild_id TEXT PRIMARY KEY,
+  snapshot_json TEXT,
+  used_user_id TEXT,
+  used_delta INTEGER,
+  created_at_utc TEXT
+);
 `);
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_bosses_name_nocase ON bosses(name COLLATE NOCASE);`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_gbs_guild_boss ON guild_boss_state(guild_id, boss_name);`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_channel_alerts_due ON channel_alerts(guild_id, delete_after_utc);`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_jorm_queue_pos ON jorm_queue(guild_id, position);`);
 
 // lightweight add-columns (safe if already exist)
 for (const sql of [
@@ -115,7 +145,11 @@ for (const sql of [
   `ALTER TABLE channel_alerts ADD COLUMN channel_id TEXT`,
   `ALTER TABLE channel_alerts ADD COLUMN message_id TEXT`,
   `ALTER TABLE channel_alerts ADD COLUMN delete_after_utc TEXT`,
-  `ALTER TABLE channel_alerts ADD COLUMN deleted INTEGER`
+  `ALTER TABLE channel_alerts ADD COLUMN deleted INTEGER`,
+  // Jorm columns in guild_settings
+  `ALTER TABLE guild_settings ADD COLUMN jorm_channel_id TEXT`,
+  `ALTER TABLE guild_settings ADD COLUMN jorm_queue_message_id TEXT`,
+  `ALTER TABLE guild_settings ADD COLUMN jorm_ring_message_id TEXT`
 ]) { try { db.prepare(sql).run(); } catch { /* ignore */ } }
 
 // --------------------------
@@ -169,29 +203,14 @@ for (const b of bossesSeed) {
 }
 
 // --- Cleanup: remove stale base-name rows for multi-location bosses ---
-// Any boss in the seed that has >1 location should NOT have a base row anymore.
 try {
   const multiBaseNames = bossesSeed
-    .filter(b => {
-      // Same splitter used in seeding
-      const asLocationArray = (loc) => {
-        if (Array.isArray(loc)) return loc.map(s => String(s).trim()).filter(Boolean);
-        const raw = String(loc || '').trim();
-        if (!raw) return [];
-        return raw.split('|').map(s => s.trim()).filter(Boolean);
-      };
-      return asLocationArray(b.location).length > 1;
-    })
+    .filter(b => asLocationArray(b.location).length > 1)
     .map(b => b.name);
 
   const delStmt = db.prepare(`DELETE FROM bosses WHERE name = ? COLLATE NOCASE`);
-  for (const base of multiBaseNames) {
-    delStmt.run(base);
-  }
-} catch (e) {
-  // Non-fatal: if anything goes wrong, we just keep going
-}
-
+  for (const base of multiBaseNames) delStmt.run(base);
+} catch { /* ignore */ }
 
 // --------------------------
 // One-time backfill: migrate legacy global kills -> per-guild
@@ -353,7 +372,6 @@ export function listKilledBosses(guildId) {
 
 /**
  * Compute the active window from a row (which may include reset respawns).
- * Row should have: last_killed_at_utc, last_trigger_kind, respawn_min/max, reset_respawn_min/max.
  */
 export function computeWindow(row) {
   if (!row?.last_killed_at_utc) return null;
@@ -417,25 +435,31 @@ export function upsertGuildSettings(guildId, patch) {
   const existing = db.prepare(`SELECT * FROM guild_settings WHERE guild_id = ?`).get(guildId);
 
   const merged = {
-    alert_channel_id: patch.alert_channel_id ?? existing?.alert_channel_id ?? null,
-    admin_role_id:    patch.admin_role_id    ?? existing?.admin_role_id    ?? null,
-    standard_role_id: patch.standard_role_id ?? existing?.standard_role_id ?? null,
-    upcoming_hours:   patch.upcoming_hours   ?? existing?.upcoming_hours   ?? 3,
-    ping_role_id:     patch.ping_role_id     ?? existing?.ping_role_id     ?? null,
-    ping_minutes:     patch.ping_minutes     ?? existing?.ping_minutes     ?? 30,
-    alert_message_id: patch.alert_message_id ?? existing?.alert_message_id ?? null,
+    alert_channel_id:       patch.alert_channel_id       ?? existing?.alert_channel_id       ?? null,
+    admin_role_id:          patch.admin_role_id          ?? existing?.admin_role_id          ?? null,
+    standard_role_id:       patch.standard_role_id       ?? existing?.standard_role_id       ?? null,
+    upcoming_hours:         patch.upcoming_hours         ?? existing?.upcoming_hours         ?? 3,
+    ping_role_id:           patch.ping_role_id           ?? existing?.ping_role_id           ?? null,
+    ping_minutes:           patch.ping_minutes           ?? existing?.ping_minutes           ?? 30,
+    alert_message_id:       patch.alert_message_id       ?? existing?.alert_message_id       ?? null,
+    jorm_channel_id:        patch.jorm_channel_id        ?? existing?.jorm_channel_id        ?? null,
+    jorm_queue_message_id:  patch.jorm_queue_message_id  ?? existing?.jorm_queue_message_id  ?? null,
+    jorm_ring_message_id:   patch.jorm_ring_message_id   ?? existing?.jorm_ring_message_id   ?? null
   };
 
   if (existing) {
     db.prepare(`
       UPDATE guild_settings
-         SET alert_channel_id = ?,
-             admin_role_id    = ?,
-             standard_role_id = ?,
-             upcoming_hours   = ?,
-             ping_role_id     = ?,
-             ping_minutes     = ?,
-             alert_message_id = ?
+         SET alert_channel_id      = ?,
+             admin_role_id         = ?,
+             standard_role_id      = ?,
+             upcoming_hours        = ?,
+             ping_role_id          = ?,
+             ping_minutes          = ?,
+             alert_message_id      = ?,
+             jorm_channel_id       = ?,
+             jorm_queue_message_id = ?,
+             jorm_ring_message_id  = ?
        WHERE guild_id = ?
     `).run(
       merged.alert_channel_id,
@@ -445,14 +469,18 @@ export function upsertGuildSettings(guildId, patch) {
       merged.ping_role_id,
       merged.ping_minutes,
       merged.alert_message_id,
+      merged.jorm_channel_id,
+      merged.jorm_queue_message_id,
+      merged.jorm_ring_message_id,
       guildId
     );
   } else {
     db.prepare(`
       INSERT INTO guild_settings
         (guild_id, alert_channel_id, admin_role_id, standard_role_id,
-         upcoming_hours, ping_role_id, ping_minutes, alert_message_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         upcoming_hours, ping_role_id, ping_minutes, alert_message_id,
+         jorm_channel_id, jorm_queue_message_id, jorm_ring_message_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       guildId,
       merged.alert_channel_id,
@@ -461,7 +489,10 @@ export function upsertGuildSettings(guildId, patch) {
       merged.upcoming_hours,
       merged.ping_role_id,
       merged.ping_minutes,
-      merged.alert_message_id
+      merged.alert_message_id,
+      merged.jorm_channel_id,
+      merged.jorm_queue_message_id,
+      merged.jorm_ring_message_id
     );
   }
 }
@@ -628,6 +659,141 @@ export function markChannelAlertDeleted(guildId, bossName, windowKey) {
        SET deleted = 1
      WHERE guild_id = ? AND boss_name = ? AND window_key = ?
   `).run(guildId, bossName, windowKey);
+}
+
+// --------------------------
+// Jorm players & queue
+// --------------------------
+export function upsertJormPlayer(guildId, userId, displayName, { has_belt = false, has_ring = false } = {}) {
+  db.prepare(`
+    INSERT INTO jorm_players (guild_id, user_id, display_name, has_belt, has_ring)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(guild_id, user_id) DO UPDATE SET
+      display_name = excluded.display_name,
+      has_belt     = COALESCE(excluded.has_belt, jorm_players.has_belt),
+      has_ring     = COALESCE(excluded.has_ring, jorm_players.has_ring)
+  `).run(guildId, userId, displayName ?? '', has_belt ? 1 : 0, has_ring ? 1 : 0);
+
+  // queue membership depends on NOT having a belt
+  const row = db.prepare(`SELECT has_belt FROM jorm_players WHERE guild_id = ? AND user_id = ?`).get(guildId, userId);
+  if (row?.has_belt) {
+    db.prepare(`DELETE FROM jorm_queue WHERE guild_id = ? AND user_id = ?`).run(guildId, userId);
+    _normalizeJormQueue(guildId);
+  } else {
+    const exists = db.prepare(`SELECT 1 FROM jorm_queue WHERE guild_id = ? AND user_id = ?`).get(guildId, userId);
+    if (!exists) {
+      const maxPos = db.prepare(`SELECT COALESCE(MAX(position), 0) AS p FROM jorm_queue WHERE guild_id = ?`).get(guildId).p;
+      db.prepare(`INSERT INTO jorm_queue (guild_id, user_id, position) VALUES (?, ?, ?)`).run(guildId, userId, maxPos + 1);
+    }
+  }
+}
+
+export function updateJormPlayer(guildId, userId, { has_belt, has_ring, display_name } = {}) {
+  const cur = db.prepare(`SELECT * FROM jorm_players WHERE guild_id = ? AND user_id = ?`).get(guildId, userId);
+  if (!cur) return false;
+
+  db.prepare(`
+    UPDATE jorm_players
+       SET display_name = COALESCE(?, display_name),
+           has_belt     = COALESCE(?, has_belt),
+           has_ring     = COALESCE(?, has_ring)
+     WHERE guild_id = ? AND user_id = ?
+  `).run(display_name ?? null,
+         has_belt == null ? null : (has_belt ? 1 : 0),
+         has_ring == null ? null : (has_ring ? 1 : 0),
+         guildId, userId);
+
+  const row = db.prepare(`SELECT has_belt FROM jorm_players WHERE guild_id = ? AND user_id = ?`).get(guildId, userId);
+  if (row?.has_belt) {
+    db.prepare(`DELETE FROM jorm_queue WHERE guild_id = ? AND user_id = ?`).run(guildId, userId);
+    _normalizeJormQueue(guildId);
+  } else {
+    const exists = db.prepare(`SELECT 1 FROM jorm_queue WHERE guild_id = ? AND user_id = ?`).get(guildId, userId);
+    if (!exists) {
+      const maxPos = db.prepare(`SELECT COALESCE(MAX(position), 0) AS p FROM jorm_queue WHERE guild_id = ?`).get(guildId).p;
+      db.prepare(`INSERT INTO jorm_queue (guild_id, user_id, position) VALUES (?, ?, ?)`).run(guildId, userId, maxPos + 1);
+    }
+  }
+  return true;
+}
+
+export function listJormQueue(guildId) {
+  return db.prepare(`
+    SELECT q.user_id, q.position, p.display_name, p.has_belt, p.has_ring, p.used_key_count
+      FROM jorm_queue q
+      JOIN jorm_players p ON p.guild_id = q.guild_id AND p.user_id = q.user_id
+     WHERE q.guild_id = ?
+     ORDER BY q.position ASC
+  `).all(guildId);
+}
+
+export function listJormPlayersWithoutRing(guildId) {
+  return db.prepare(`
+    SELECT user_id, display_name
+      FROM jorm_players
+     WHERE guild_id = ? AND has_ring = 0
+     ORDER BY display_name COLLATE NOCASE
+  `).all(guildId);
+}
+
+export function jormRotate(guildId, kind /* 'used' | 'skipped' */) {
+  const queue = listJormQueue(guildId);
+  if (!queue.length) return { changed: false };
+
+  const snapshot = JSON.stringify(queue.map(x => x.user_id));
+  const top = queue[0].user_id;
+  const usedDelta = (kind === 'used') ? 1 : 0;
+
+  const tx = db.transaction(() => {
+    if (kind === 'used') {
+      db.prepare(`UPDATE jorm_players SET used_key_count = used_key_count + 1 WHERE guild_id = ? AND user_id = ?`).run(guildId, top);
+    }
+    db.prepare(`DELETE FROM jorm_queue WHERE guild_id = ? AND user_id = ?`).run(guildId, top);
+    const maxPos = db.prepare(`SELECT COALESCE(MAX(position), 0) AS p FROM jorm_queue WHERE guild_id = ?`).get(guildId).p;
+    db.prepare(`INSERT OR REPLACE INTO jorm_queue (guild_id, user_id, position) VALUES (?, ?, ?)`).run(guildId, top, maxPos + 1);
+
+    _normalizeJormQueue(guildId);
+
+    db.prepare(`
+      INSERT OR REPLACE INTO jorm_undo (guild_id, snapshot_json, used_user_id, used_delta, created_at_utc)
+      VALUES (?, ?, ?, ?, datetime('now'))
+    `).run(guildId, snapshot, top, usedDelta);
+  });
+  tx();
+
+  return { changed: true, topUserId: top, kind };
+}
+
+export function jormUndo(guildId) {
+  const row = db.prepare(`SELECT * FROM jorm_undo WHERE guild_id = ?`).get(guildId);
+  if (!row) return { undone: false };
+
+  const order = JSON.parse(row.snapshot_json || '[]');
+  const tx = db.transaction(() => {
+    db.prepare(`DELETE FROM jorm_queue WHERE guild_id = ?`).run(guildId);
+    let pos = 1;
+    for (const uid of order) {
+      const stillEligible = db.prepare(`SELECT has_belt FROM jorm_players WHERE guild_id = ? AND user_id = ?`).get(guildId, uid);
+      if (stillEligible && !stillEligible.has_belt) {
+        db.prepare(`INSERT INTO jorm_queue (guild_id, user_id, position) VALUES (?, ?, ?)`).run(guildId, uid, pos++);
+      }
+    }
+    if (row.used_user_id && row.used_delta) {
+      db.prepare(`UPDATE jorm_players SET used_key_count = MAX(0, used_key_count - ?) WHERE guild_id = ? AND user_id = ?`)
+        .run(row.used_delta, guildId, row.used_user_id);
+    }
+    db.prepare(`DELETE FROM jorm_undo WHERE guild_id = ?`).run(guildId);
+  });
+  tx();
+
+  return { undone: true };
+}
+
+function _normalizeJormQueue(guildId) {
+  const rows = db.prepare(`SELECT user_id FROM jorm_queue WHERE guild_id = ? ORDER BY position ASC`).all(guildId);
+  let pos = 1;
+  const up = db.prepare(`UPDATE jorm_queue SET position = ? WHERE guild_id = ? AND user_id = ?`);
+  for (const r of rows) up.run(pos++, guildId, r.user_id);
 }
 
 export default db;

@@ -16,14 +16,13 @@ import {
   getUserRegistration,
   removeSubscription,
   getAllBossRows,
-  getAllBossRowsForGuild,   // guild
-  getBossForGuild,          // guild
+  getAllBossRowsForGuild,
+  getBossForGuild,
   applyServerReset,
   listKilledBosses,
   upsertJormPlayer,
   updateJormPlayer,
-  getJormPlayerByUserId,
-  findJormPlayersByName
+  getJormPlayerByFamily
 } from '../db.js';
 
 import {
@@ -52,18 +51,12 @@ function titleCase(s) {
   return s?.trim().replace(/\s+/g, ' ').replace(/\b\w/g, m => m.toUpperCase()) || '';
 }
 
-// Flexible boss resolver (case/spacing tolerant)
 function ensureBossExists(inputName) {
-  // Try direct fetch first
   const direct = getBossByName(inputName);
   if (direct) return { boss: direct };
 
-  // Fuzzy match across all bosses (static metadata)
   const rows = getAllBossRows();
-  const norm = (x) => String(x || '')
-    .toLowerCase()
-    .replace(/[\s_'’\-]/g, ''); // collapse common separators
-
+  const norm = (x) => String(x || '').toLowerCase().replace(/[\s_'’\-]/g, '');
   const targetTitle = titleCase(inputName);
   const target = norm(inputName);
   let boss =
@@ -95,7 +88,6 @@ function isAdminAllowed(interaction) {
 const NBSP_TILDE = '\u00A0~\u00A0';
 
 function formatRespawnPattern(min, max) {
-  // Untracked (null) → show "None"
   if (min == null || max == null) return 'None';
   const nMin = Number(min);
   const nMax = Number(max);
@@ -105,7 +97,6 @@ function formatRespawnPattern(min, max) {
   return `${min}–${max} hours after death`;
 }
 
-// Untracked (static) bosses have null min/max → only allow /details & /drops
 function isUntrackedBoss(b) {
   return b?.respawn_min_hours == null || b?.respawn_max_hours == null;
 }
@@ -150,7 +141,6 @@ function renderWindowFields(boss, window) {
   };
 }
 
-// Guild-scoped upcoming embed
 function buildUpcomingEmbedForGuild(hours, guildId) {
   const rows = getAllBossRowsForGuild(guildId);
   const now = nowUtc();
@@ -226,9 +216,7 @@ export async function handleKilled(interaction) {
   let deathUtc = nowUtc();
   if (timeStr) {
     const parsed = parseServerHHmmToUtcToday(timeStr);
-    if (!parsed) {
-      return interaction.reply({ ephemeral: true, content: 'Invalid time format. Use HH:MM in UTC, e.g. 21:22' });
-    }
+    if (!parsed) return interaction.reply({ ephemeral: true, content: 'Invalid time format. Use HH:MM in UTC, e.g. 21:22' });
     deathUtc = parsed > nowUtc() ? parsed.minus({ days: 1 }) : parsed;
   }
 
@@ -236,10 +224,7 @@ export async function handleKilled(interaction) {
     return interaction.reply({ ephemeral: true, content: 'Failed to record kill. (DB)' });
   }
 
-  // Event-driven cleanup: remove any stale "Spawn Approaching" messages for this boss
   bus.emit('cleanupStaleApproaching', { guildId: interaction.guildId, bossNames: [bossMeta.name] });
-
-  // Force an immediate dashboard refresh
   bus.emit('forceUpdate', { guildId: interaction.guildId });
 
   const updated = getBossForGuild(interaction.guildId, bossMeta.name);
@@ -275,20 +260,14 @@ export async function handleServerReset(interaction) {
   let resetUtc = nowUtc();
   if (timeStr) {
     const parsed = parseServerHHmmToUtcToday(timeStr);
-    if (!parsed) {
-      return interaction.reply({ ephemeral: true, content: 'Invalid time format. Use HH:MM in UTC, e.g. 09:00' });
-    }
+    if (!parsed) return interaction.reply({ ephemeral: true, content: 'Invalid time format. Use HH:MM in UTC, e.g. 09:00' });
     resetUtc = parsed > nowUtc() ? parsed.minus({ days: 1 }) : parsed;
   }
 
   const { updatedNames } = applyServerReset(interaction.guildId, resetUtc.toISO());
-
-  // Event-driven cleanup for any bosses whose window just changed
   if (updatedNames && updatedNames.length) {
     bus.emit('cleanupStaleApproaching', { guildId: interaction.guildId, bossNames: updatedNames });
   }
-
-  // Force an immediate dashboard refresh
   bus.emit('forceUpdate', { guildId: interaction.guildId });
 
   const embed = new EmbedBuilder()
@@ -355,7 +334,7 @@ export async function handleDetails(interaction) {
   const bossName = interaction.options.getString('boss', true);
   const check = ensureBossExists(bossName);
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
-  const b = check.boss; // static metadata is fine for details
+  const b = check.boss;
 
   const fields = [
     { name: 'Location', value: b.location || 'Unknown', inline: true },
@@ -381,13 +360,10 @@ export async function handleDetails(interaction) {
   }
 
   return interaction.reply({
-    embeds: [
-      new EmbedBuilder().setTitle(`${b.name} - Details`).addFields(fields).setColor(0x6C5CE7)
-    ]
+    embeds: [ new EmbedBuilder().setTitle(`${b.name} - Details`).addFields(fields).setColor(0x6C5CE7) ]
   });
 }
 
-// /drops
 export async function handleDrops(interaction) {
   if (!isAllowedForStandard(interaction, 'drops')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /drops.' });
@@ -412,7 +388,6 @@ export async function handleReset(interaction) {
   if (check.error) return interaction.reply({ ephemeral: true, content: check.error });
 
   const bossRow = getBossForGuild(interaction.guildId, check.boss.name);
-
   const guardMsg = guardUntrackedForCommand(bossRow, 'reset');
   if (guardMsg) return interaction.reply({ ephemeral: true, content: guardMsg });
 
@@ -423,10 +398,7 @@ export async function handleReset(interaction) {
   const ok = resetBoss(interaction.guildId, bossRow.name);
   if (!ok) return interaction.reply({ ephemeral: true, content: 'Failed to reset boss.' });
 
-  // Event-driven cleanup: remove any stale "Spawn Approaching" messages for this boss
   bus.emit('cleanupStaleApproaching', { guildId: interaction.guildId, bossNames: [bossRow.name] });
-
-  // Force an immediate dashboard refresh for this guild
   bus.emit('forceUpdate', { guildId: interaction.guildId });
 
   return interaction.reply({
@@ -434,7 +406,6 @@ export async function handleReset(interaction) {
   });
 }
 
-// /subscribe boss
 export async function handleSubscribeBoss(interaction) {
   if (!isAllowedForStandard(interaction, 'subscribe')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /subscribe.' });
@@ -465,12 +436,9 @@ export async function handleSubscribeAll(interaction) {
   if (!isAllowedForStandard(interaction, 'subscribe')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /subscribe.' });
   }
-
-  const tracked = getAllBossRows()
-    .filter(b => !isUntrackedBoss(b))
-    .map(b => b.name);
-
+  const tracked = getAllBossRows().filter(b => !isUntrackedBoss(b)).map(b => b.name);
   for (const name of tracked) addSubscription(interaction.user.id, interaction.guildId, name);
+
   const reg = getUserRegistration(interaction.user.id, interaction.guildId);
   if (!reg || reg.alert_minutes == null) upsertUserAlertMinutes(interaction.user.id, interaction.guildId, 30);
 
@@ -528,39 +496,28 @@ export async function handleSubscriptions(interaction) {
   return interaction.reply({ embeds: [ new EmbedBuilder().setTitle('Your Subscriptions').setDescription(desc).setColor(0x8E44AD) ], ephemeral: true });
 }
 
-// /setalert - set user DM lead time only (1–1440)
 export async function handleSetAlert(interaction) {
   if (!isAllowedForStandard(interaction, 'setalert')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /setalert.' });
   }
-
   const minutes = interaction.options.getInteger('minutes', true);
   if (minutes < 1 || minutes > 1440) {
     return interaction.reply({ ephemeral: true, content: 'Minutes must be between 1 and 1440.' });
   }
-
   upsertUserAlertMinutes(interaction.user.id, interaction.guildId, minutes);
   return interaction.reply({ ephemeral: true, content: `Your alert lead time is now **${minutes} minutes** before window start.` });
 }
 
-// /setcommandrole - gate a command behind a specific role (admin only)
 export async function handleSetCommandRole(interaction) {
   if (!isAdminAllowed(interaction)) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /setcommandrole.' });
   }
-
   const commandName = interaction.options.getString('command', true);
   const role = interaction.options.getRole('role', true);
-
   setCommandRole(interaction.guildId, commandName, role.id);
-
-  return interaction.reply({
-    ephemeral: true,
-    content: `Set role for **/${commandName}** to ${role}.`
-  });
+  return interaction.reply({ ephemeral: true, content: `Set role for **/${commandName}** to ${role}.` });
 }
 
-// /upcoming - dynamic hours (guild-scoped)
 export async function handleUpcoming(interaction) {
   if (!isAllowedForStandard(interaction, 'upcoming')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /upcoming.' });
@@ -571,7 +528,7 @@ export async function handleUpcoming(interaction) {
   return interaction.reply({ embeds: [embed] });
 }
 
-// ---------- Setup Wizard ----------
+// ---------- Setup Wizard (5 rows max) ----------
 export async function handleSetup(interaction) {
   if (!isAdminAllowed(interaction)) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /setup.' });
@@ -581,20 +538,16 @@ export async function handleSetup(interaction) {
   const emb = new EmbedBuilder()
     .setTitle('Boss Alerts - Setup Wizard')
     .setDescription([
-      'Use the menus below to configure:',
-      '1) **Alert Channel** for the dashboard & pings',
-      '2) **Ping Role** to mention when a window is near',
-      '3) **Lookahead Hours** for the dashboard',
-      '4) **Ping Lead Minutes** before a window opens',
-      '5) **Jorm Messages Channel** for Queue & Ring lists',
-      '',
-      'Click **Create/Update Dashboard Message** and/or **Create/Update Jorm Messages** when you’re done.'
+      'Configure below, then click the buttons to create/update messages.',
+      '• **Alert Channel** for dashboard & pings',
+      '• **Ping Role** to mention when a window is near',
+      '• **Lookahead Hours** for the dashboard',
+      '• **Jorm Messages Channel** for Queue & Ring lists'
     ].join('\n'))
     .addFields(
       { name: 'Current Alert Channel', value: gs.alert_channel_id ? `<#${gs.alert_channel_id}>` : '-', inline: true },
       { name: 'Current Ping Role', value: gs.ping_role_id ? `<@&${gs.ping_role_id}>` : '-', inline: true },
       { name: 'Lookahead Hours', value: String(gs.upcoming_hours ?? 3), inline: true },
-      { name: 'Ping Lead Minutes', value: String(gs.ping_minutes ?? 30), inline: true },
       { name: 'Jorm Messages Channel', value: gs.jorm_channel_id ? `<#${gs.jorm_channel_id}>` : '-', inline: true }
     )
     .setColor(0x2ECC71);
@@ -620,195 +573,98 @@ export async function handleSetup(interaction) {
       .setMinValues(1).setMaxValues(1)
   );
   const row4 = new ActionRowBuilder().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId('setup:minutes')
-      .setPlaceholder('Select ping lead minutes')
-      .addOptions([5,10,15,30,60,120].map(m => ({ label: `${m} minutes`, value: String(m) })))
-      .setMinValues(1).setMaxValues(1)
-  );
-  const row5 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId('setup:make_message')
-      .setLabel('Create/Update Dashboard Message')
-      .setStyle(ButtonStyle.Primary)
-  );
-
-  // NEW: Jorm message channel + creation button
-  const rowJormChannel = new ActionRowBuilder().addComponents(
     new ChannelSelectMenuBuilder()
       .setCustomId('setup:jorm_channel')
       .setPlaceholder('Select channel for Jorm Queue & Ring FW')
       .addChannelTypes(ChannelType.GuildText)
       .setMinValues(1).setMaxValues(1)
   );
-  const rowJormBtn = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId('setup:make_jorm')
-      .setLabel('Create/Update Jorm Messages')
-      .setStyle(ButtonStyle.Secondary)
+  const row5 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('setup:make_message').setLabel('Create/Update Dashboard').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('setup:make_jorm').setLabel('Create/Update Jorm Messages').setStyle(ButtonStyle.Secondary)
   );
 
-  return interaction.reply({
-    embeds: [emb],
-    components: [row1, row2, row3, row4, row5, rowJormChannel, rowJormBtn],
-    ephemeral: true
-  });
+  return interaction.reply({ embeds: [emb], components: [row1, row2, row3, row4, row5], ephemeral: true });
 }
 
 // ---------- Standalone player commands ----------
-export async function handlePlayerAdd(interaction) {
-  if (!isAllowedForStandard(interaction, 'playeradd')) {
-    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /playeradd.' });
+export async function handleAddPlayer(interaction) {
+  if (!isAllowedForStandard(interaction, 'addplayer')) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /addplayer.' });
   }
 
-  const user = interaction.options.getUser('user', true);
+  const family = interaction.options.getString('family', true).trim();
   const belt = interaction.options.getBoolean('belt', false);
   const ring = interaction.options.getBoolean('ring', false);
 
-  upsertJormPlayer(interaction.guildId, user.id, user.tag, {
+  upsertJormPlayer(interaction.guildId, family, {
     has_belt: belt ?? false,
     has_ring: ring ?? false
   });
 
-  // Auto-refresh Jorm messages
   bus.emit('jormUpdate', { guildId: interaction.guildId });
 
   return interaction.reply({
     ephemeral: true,
-    content: `Added/updated **${user}**. Belt: **${belt ?? false}**, Ring: **${ring ?? false}**.`
+    content: `Added/updated **${family}**. Belt: **${belt ?? false}**, Ring: **${ring ?? false}**.`
   });
 }
 
-export async function handlePlayerUpdate(interaction) {
-  if (!isAllowedForStandard(interaction, 'playerupdate')) {
-    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /playerupdate.' });
+export async function handleUpdatePlayer(interaction) {
+  if (!isAllowedForStandard(interaction, 'updateplayer')) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /updateplayer.' });
   }
 
-  const user = interaction.options.getUser('user', true);
+  const family = interaction.options.getString('family', true).trim();
   const belt = interaction.options.getBoolean('belt', false);
   const ring = interaction.options.getBoolean('ring', false);
 
-  const ok = updateJormPlayer(interaction.guildId, user.id, {
+  const ok = updateJormPlayer(interaction.guildId, family, {
     has_belt: belt ?? null,
     has_ring: ring ?? null,
-    display_name: user.tag
+    display_name: family
   });
 
   if (!ok) {
-    return interaction.reply({ ephemeral: true, content: `Player **${user}** is not in the list. Use **/playeradd** first.` });
+    return interaction.reply({ ephemeral: true, content: `**${family}** is not in the list. Use **/addplayer** first.` });
   }
 
-  // Auto-refresh Jorm messages
   bus.emit('jormUpdate', { guildId: interaction.guildId });
 
   return interaction.reply({
     ephemeral: true,
-    content: `Updated **${user}**. Belt: ${belt ?? 'no change'}, Ring: ${ring ?? 'no change'}.`
+    content: `Updated **${family}**. Belt: ${belt ?? 'no change'}, Ring: ${ring ?? 'no change'}.`
   });
 }
 
-// ---------- /player (dynamic profile) ----------
-function labelizeColumn(col) {
-  const known = {
-    has_belt: 'Jormongand Belt',
-    has_ring: 'Montoro Skull Ring',
-    used_key_count: 'Keys Used',
-    display_name: 'Display Name'
-  };
-  if (known[col]) return known[col];
-  return col
-    .split('_')
-    .map(s => s.charAt(0).toUpperCase() + s.slice(1))
-    .join(' ');
-}
-
-function formatValue(v) {
-  if (v === null || v === undefined) return '—';
-  if (typeof v === 'number') return String(v);
-  if (typeof v === 'string') {
-    const lc = v.toLowerCase();
-    if (lc === 'true' || lc === 'false') return lc === 'true' ? 'Yes' : 'No';
-    return v;
-  }
-  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
-  return String(v);
-}
-
-export async function handlePlayer(interaction) {
+export async function handlePlayerLookup(interaction) {
   if (!isAllowedForStandard(interaction, 'player')) {
     return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /player.' });
   }
 
-  const targetUser = interaction.options.getUser('user', false);
-  const nameQuery = interaction.options.getString('name', false);
-
-  if (!targetUser && !nameQuery) {
-    return interaction.reply({
-      ephemeral: true,
-      content: 'Provide either **user** or **name**. Example: `/player user:@Somebody` or `/player name:Some`'
-    });
+  const family = interaction.options.getString('family', true).trim();
+  const p = getJormPlayerByFamily(interaction.guildId, family);
+  if (!p) {
+    return interaction.reply({ ephemeral: true, content: `No player found for **${family}**.` });
   }
 
-  let row = null;
-  let multiple = [];
+  const jormFields = [
+    { name: 'Jormongand Belt', value: p.has_belt ? 'Have' : 'Need', inline: true },
+    { name: 'Montoro Skull Ring', value: p.has_ring ? 'Have' : 'Need', inline: true },
+    { name: 'Keys Used', value: String(p.used_key_count || 0), inline: true },
+    { name: 'Queue Position', value: p.has_belt ? '— (has belt)' : (p.queue_order ? `#${p.queue_order}` : '—'), inline: true }
+  ];
 
-  if (targetUser) {
-    row = getJormPlayerByUserId(interaction.guildId, targetUser.id);
-    if (!row) {
-      return interaction.reply({
-        ephemeral: true,
-        content: `No player record found for ${targetUser}. Use **/playeradd** to add them.`
-      });
-    }
-  } else {
-    multiple = findJormPlayersByName(interaction.guildId, nameQuery);
-    if (multiple.length === 0) {
-      return interaction.reply({
-        ephemeral: true,
-        content: `No players matched \`${nameQuery}\`.`
-      });
-    }
-    if (multiple.length > 1) {
-      const list = multiple
-        .map(p => `• ${p.display_name || p.user_id} (<@${p.user_id}>)`)
-        .join('\n');
-      return interaction.reply({
-        ephemeral: true,
-        embeds: [
-          new EmbedBuilder()
-            .setTitle('Multiple matches')
-            .setDescription(list)
-            .setFooter({ text: 'Tip: re-run /player with the user picker to disambiguate.' })
-            .setColor(0x95A5A6)
-        ]
-      });
-    }
-    row = multiple[0] || null;
-  }
+  const armorFields = [
+    { name: 'MCC1', value: p.mcc1 ?? '—', inline: true },
+    { name: 'MCC2', value: p.mcc2 ?? '—', inline: true },
+    { name: 'MCC3', value: p.mcc3 ?? '—', inline: true }
+  ];
 
-  const exclude = new Set(['guild_id', 'user_id']); // show all other columns
-  const fields = [];
+  const embed = new EmbedBuilder()
+    .setTitle(`Player • ${p.display_name || p.family_name}`)
+    .addFields({ name: 'Jormongand', value: '\u200B' }, ...jormFields, { name: 'Armor', value: '\u200B' }, ...armorFields)
+    .setColor(0x3BA55D);
 
-  // Always show mention & id first
-  fields.push({
-    name: 'Discord',
-    value: `<@${row.user_id}> \n\`${row.user_id}\``,
-    inline: true
-  });
-
-  for (const [col, val] of Object.entries(row)) {
-    if (exclude.has(col)) continue;
-    fields.push({
-      name: labelizeColumn(col),
-      value: formatValue(val),
-      inline: true
-    });
-  }
-
-  const emb = new EmbedBuilder()
-    .setTitle(`Player: ${row.display_name || row.user_id}`)
-    .addFields(fields)
-    .setColor(0x00A8FF);
-
-  return interaction.reply({ embeds: [emb], ephemeral: true });
+  return interaction.reply({ embeds: [embed] });
 }

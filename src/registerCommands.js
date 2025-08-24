@@ -118,7 +118,7 @@ commands.push(
     .setDMPermission(false)
 );
 
-/** /upcoming - dynamic hours (within N hours only) */
+/** /upcoming */
 commands.push(
   new SlashCommandBuilder()
     .setName('upcoming')
@@ -141,11 +141,11 @@ commands.push(
     .setDMPermission(false)
 );
 
-/** /setup - wizard (no args) */
+/** /setup */
 commands.push(
   new SlashCommandBuilder()
     .setName('setup')
-    .setDescription('Configuration wizard: alert channel, ping role, hours & lead minutes')
+    .setDescription('Configuration wizard: channels, roles, and dashboard')
     .setDMPermission(false)
 );
 
@@ -154,7 +154,9 @@ const gateableCommands = [
   'status', 'details', 'drops', 'killed',
   'subscribe', 'unsubscribe', 'subscriptions',
   'upcoming', 'reset', 'serverreset', 'setup',
-  'player', 'playeradd', 'playerupdate'
+  'setalert',
+  // NEW player commands
+  'addplayer', 'updateplayer', 'player'
 ];
 
 commands.push(
@@ -176,7 +178,7 @@ commands.push(
     .setDMPermission(false)
 );
 
-/** /setalert (only adjusts minutes, per user) */
+/** /setalert (per-user) */
 commands.push(
   new SlashCommandBuilder()
     .setName('setalert')
@@ -206,66 +208,64 @@ commands.push(
     .setDMPermission(false)
 );
 
-/** /playeradd */
+/** NEW: /addplayer */
 commands.push(
   new SlashCommandBuilder()
-    .setName('playeradd')
-    .setDescription('Add a player to the list (Jorm items now; extensible later)')
-    .addUserOption(o =>
-      o.setName('user')
-       .setDescription('Discord user')
+    .setName('addplayer')
+    .setDescription('Add a player by Family Name (Jorm tracking)')
+    .addStringOption(o =>
+      o.setName('family')
+       .setDescription('Family Name')
        .setRequired(true)
+       .setAutocomplete(false)
     )
     .addBooleanOption(o =>
       o.setName('belt')
-       .setDescription('Has Jormongand Belt? (true/false)')
+       .setDescription('Has Jormongand Belt? (default: false)')
        .setRequired(false)
     )
     .addBooleanOption(o =>
       o.setName('ring')
-       .setDescription('Has Montoro Skull Ring? (true/false)')
+       .setDescription('Has Montoro Skull Ring? (default: false)')
        .setRequired(false)
     )
     .setDMPermission(false)
 );
 
-/** /playerupdate */
+/** NEW: /updateplayer */
 commands.push(
   new SlashCommandBuilder()
-    .setName('playerupdate')
-    .setDescription('Update a player (belt/ring etc.)')
-    .addUserOption(o =>
-      o.setName('user')
-       .setDescription('Discord user')
+    .setName('updateplayer')
+    .setDescription('Update a player by Family Name (Jorm tracking)')
+    .addStringOption(o =>
+      o.setName('family')
+       .setDescription('Family Name')
        .setRequired(true)
+       .setAutocomplete(true)
     )
     .addBooleanOption(o =>
       o.setName('belt')
-       .setDescription('Has Jormongand Belt? (true/false)')
+       .setDescription('Set Jormongand Belt (true/false)')
        .setRequired(false)
     )
     .addBooleanOption(o =>
       o.setName('ring')
-       .setDescription('Has Montoro Skull Ring? (true/false)')
+       .setDescription('Set Montoro Skull Ring (true/false)')
        .setRequired(false)
     )
     .setDMPermission(false)
 );
 
-/** /player (dynamic profile) */
+/** NEW: /player */
 commands.push(
   new SlashCommandBuilder()
     .setName('player')
-    .setDescription('Show tracked details for a player')
-    .addUserOption(o =>
-      o.setName('user')
-       .setDescription('Select a Discord user')
-       .setRequired(false)
-    )
+    .setDescription('Show a player profile by Family Name')
     .addStringOption(o =>
-      o.setName('name')
-       .setDescription('Search by display name (case-insensitive)')
-       .setRequired(false)
+      o.setName('family')
+       .setDescription('Family Name')
+       .setRequired(true)
+       .setAutocomplete(true)
     )
     .setDMPermission(false)
 );

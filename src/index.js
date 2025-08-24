@@ -25,9 +25,9 @@ import {
   handleSetCommandRole,
   handleSetAlert,
   handleServerReset,
-  handlePlayerAdd,
-  handlePlayerUpdate,
-  handlePlayer
+  handleAddPlayer,
+  handleUpdatePlayer,
+  handlePlayerLookup
 } from './commands/handlers.js';
 
 import {
@@ -35,21 +35,22 @@ import {
   getGuildSettings,
   upsertGuildSettings,
   getAllGuildSettings,
-  getAllBossRows,              // static metadata (used for autocomplete filtering)
-  getAllBossRowsForGuild,      // guild-scoped state + metadata
+  getAllBossRows,
+  getAllBossRowsForGuild,
   computeWindow,
   hasChannelBeenPinged,
   listRegisteredUsers,
   hasUserBeenAlerted,
   markUserAlerted,
-  listKilledBosses,            // guild-scoped
+  listKilledBosses,
   recordChannelPingMessage,
   listChannelMessagesDueForDeletion,
   markChannelAlertDeleted,
   listJormQueue,
   listJormPlayersWithoutRing,
   jormRotate,
-  jormUndo
+  jormUndo,
+  findJormPlayersByName
 } from './db.js';
 
 import { nowUtc, fmtUtc, toUnixSeconds } from './utils/time.js';
@@ -71,10 +72,8 @@ const client = new Client({
   partials: [Partials.Channel]
 });
 
-// Small helper for pretty window ranges
 const NBSP_TILDE = '\u00A0~\u00A0';
 
-// Build an upcoming embed **for a specific guild**, using that guild's boss state
 function buildUpcomingEmbedForGuild(hours, guildId) {
   const rows = getAllBossRowsForGuild(guildId);
   const now = nowUtc();
@@ -85,8 +84,8 @@ function buildUpcomingEmbedForGuild(hours, guildId) {
     if (!b.last_killed_at_utc) continue;
     const w = computeWindow(b);
     if (!w) continue;
-    if (w.end <= now) continue;      // already closed window
-    if (w.start > horizon) continue; // starts beyond horizon
+    if (w.end <= now) continue;
+    if (w.start > horizon) continue;
     within.push({ boss: b, window: w });
   }
 
@@ -130,7 +129,7 @@ function buildUpcomingEmbedForGuild(hours, guildId) {
 function buildJormQueueEmbed(guildId) {
   const queue = listJormQueue(guildId);
   const lines = queue.length
-    ? queue.map((q, i) => `${i + 1}. <@${q.user_id}> ${q.used_key_count ? `(used: ${q.used_key_count})` : ''}`)
+    ? queue.map((q, i) => `${i + 1}. ${q.display_name || q.family_name} ${q.used_key_count ? `(used: ${q.used_key_count})` : ''}`)
     : ['(no eligible players - everyone has a belt)'];
 
   return new EmbedBuilder()
@@ -142,7 +141,7 @@ function buildJormQueueEmbed(guildId) {
 function buildJormRingEmbed(guildId) {
   const rows = listJormPlayersWithoutRing(guildId);
   const lines = rows.length
-    ? rows.map(r => `• <@${r.user_id}>`)
+    ? rows.map(r => `• ${r.display_name || r.family_name}`)
     : ['(everyone has a ring)'];
 
   return new EmbedBuilder()
@@ -201,44 +200,46 @@ client.once(Events.ClientReady, (c) => {
   console.log(`✅ Logged in as ${c.user.tag}`);
 });
 
-// --------- Autocomplete for boss names ----------
+// --------- Autocomplete ----------
 client.on(Events.InteractionCreate, async (interaction) => {
-  if (interaction.isAutocomplete()) {
-    try {
-      const focused = interaction.options.getFocused(true);
-      if (focused?.name === 'boss') {
-        const query = String(focused.value || '').toLowerCase();
-        const rows = getAllBossRows(); // static metadata for filtering tracked/untracked
-        const isUntracked = (b) => b.respawn_min_hours == null || b.respawn_max_hours == null;
+  if (!interaction.isAutocomplete()) return;
 
-        let sourceNames = [];
+  try {
+    const focused = interaction.options.getFocused(true);
 
-        if (interaction.commandName === 'unsubscribe') {
-          const sub = interaction.options.getSubcommand(false);
-          sourceNames = (!sub || sub === 'boss')
-            ? listUserSubscriptions(interaction.user.id, interaction.guildId)
-            : [];
-        } else if (interaction.commandName === 'reset') {
-          // Only bosses with a recorded kill - guild scoped
-          sourceNames = listKilledBosses(interaction.guildId);
-        } else if (interaction.commandName === 'details' || interaction.commandName === 'drops') {
-          // All bosses (tracked + untracked) for info-only commands
-          sourceNames = rows.map(b => b.name);
-        } else {
-          // Other commands → tracked-only
-          sourceNames = rows.filter(b => !isUntracked(b)).map(b => b.name);
-        }
+    // Boss autocomplete
+    if (focused?.name === 'boss') {
+      const query = String(focused.value || '').toLowerCase();
+      const rows = getAllBossRows();
+      const isUntracked = (b) => b.respawn_min_hours == null || b.respawn_max_hours == null;
 
-        const names = sourceNames
-          .filter(n => n.toLowerCase().includes(query))
-          .slice(0, 25);
-
-        return interaction.respond(names.map(n => ({ name: n, value: n })));
+      let sourceNames = [];
+      if (interaction.commandName === 'unsubscribe') {
+        const sub = interaction.options.getSubcommand(false);
+        sourceNames = (!sub || sub === 'boss')
+          ? listUserSubscriptions(interaction.user.id, interaction.guildId)
+          : [];
+      } else if (interaction.commandName === 'reset') {
+        sourceNames = listKilledBosses(interaction.guildId);
+      } else if (interaction.commandName === 'details' || interaction.commandName === 'drops') {
+        sourceNames = rows.map(b => b.name);
+      } else {
+        sourceNames = rows.filter(b => !isUntracked(b)).map(b => b.name);
       }
-    } catch (err) {
-      console.warn('Autocomplete error:', err);
+
+      const names = sourceNames.filter(n => n.toLowerCase().includes(query)).slice(0, 25);
+      return interaction.respond(names.map(n => ({ name: n, value: n })));
     }
-    return;
+
+    // Family name autocomplete for /player and /updateplayer
+    if (focused?.name === 'family' && ['player', 'updateplayer'].includes(interaction.commandName)) {
+      const query = String(focused.value || '').trim();
+      const rows = findJormPlayersByName(interaction.guildId, query);
+      const choices = rows.map(r => ({ name: r.display_name || r.family_name, value: r.family_name })).slice(0, 25);
+      return interaction.respond(choices);
+    }
+  } catch (err) {
+    console.warn('Autocomplete error:', err);
   }
 });
 
@@ -258,9 +259,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
     ? interaction.member.roles.cache.has(gs.admin_role_id)
     : interaction.member.permissions.has('ManageGuild');
 
-  // Jorm buttons (live message controls)
+  // Jorm buttons
   if (interaction.isButton() && interaction.customId?.startsWith('jorm:')) {
-    if (!isAdmin && !isAllowedByStandardForJorm(interaction)) {
+    const allowed = isAdmin || (function isAllowedByStandardForJorm() {
+      const roleToCheck = gs?.standard_role_id;
+      if (!roleToCheck) return true;
+      return interaction.member.roles.cache.has(roleToCheck);
+    })();
+
+    if (!allowed) {
       return interaction.reply({ ephemeral: true, content: 'You do not have permission to use these controls.' });
     }
     try {
@@ -308,13 +315,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return interaction.deferUpdate();
     }
 
-    if (interaction.customId === 'setup:minutes' && interaction.isStringSelectMenu()) {
-      const minutes = parseInt(interaction.values[0], 10);
-      upsertGuildSettings(interaction.guildId, { ping_minutes: minutes });
-      return interaction.deferUpdate();
-    }
-
-    // NEW: Jorm messages channel
     if (interaction.customId === 'setup:jorm_channel' && interaction.isChannelSelectMenu()) {
       const ch = interaction.channels.first();
       upsertGuildSettings(interaction.guildId, { jorm_channel_id: ch?.id ?? null });
@@ -324,20 +324,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.customId === 'setup:make_message' && interaction.isButton()) {
       const settings = getGuildSettings(interaction.guildId) || {};
       if (!settings.alert_channel_id) {
-        return interaction.update({
-          content: '❗ Select an **Alert Channel** first in the menus above.',
-          embeds: [],
-          components: []
-        });
+        return interaction.update({ content: '❗ Select an **Alert Channel** first.', embeds: [], components: [] });
       }
 
       const channel = await interaction.guild.channels.fetch(settings.alert_channel_id).catch(() => null);
       if (!channel) {
-        return interaction.update({
-          content: '❗ Configured alert channel is invalid or missing permissions.',
-          embeds: [],
-          components: []
-        });
+        return interaction.update({ content: '❗ Configured alert channel is invalid or missing permissions.', embeds: [], components: [] });
       }
 
       const hours = settings.upcoming_hours ?? 3;
@@ -345,9 +337,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       let messageId = settings.alert_message_id;
       let msg = null;
-      if (messageId) {
-        msg = await channel.messages.fetch(messageId).catch(() => null);
-      }
+      if (messageId) msg = await channel.messages.fetch(messageId).catch(() => null);
       if (msg) {
         await msg.edit({ embeds: [embed] });
       } else {
@@ -356,42 +346,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
         upsertGuildSettings(interaction.guildId, { alert_message_id: messageId });
       }
 
-      await interaction.update({
-        content: '✅ Dashboard message created/updated.',
-        embeds: [],
-        components: []
-      });
-
-      setTimeout(() => {
-        interaction.deleteReply().catch(() => {});
-      }, 3000);
-
+      await interaction.update({ content: '✅ Dashboard message created/updated.', embeds: [], components: [] });
+      setTimeout(() => { interaction.deleteReply().catch(() => {}); }, 3000);
       return;
     }
 
-    // Create/Update Jorm messages
     if (interaction.customId === 'setup:make_jorm' && interaction.isButton()) {
       const settings = getGuildSettings(interaction.guildId) || {};
       if (!settings.jorm_channel_id) {
-        return interaction.update({
-          content: '❗ Select a **Jorm Messages Channel** first in the menus above.',
-          embeds: [],
-          components: []
-        });
+        return interaction.update({ content: '❗ Select a **Jorm Messages Channel** first.', embeds: [], components: [] });
       }
 
       await renderOrCreateJormMessages(interaction.guildId, { forceCreate: true });
 
-      await interaction.update({
-        content: '✅ Jorm Queue & Ring FW messages created/updated.',
-        embeds: [],
-        components: []
-      });
-
-      setTimeout(() => {
-        interaction.deleteReply().catch(() => {});
-      }, 3000);
-
+      await interaction.update({ content: '✅ Jorm Queue & Ring FW messages created/updated.', embeds: [], components: [] });
+      setTimeout(() => { interaction.deleteReply().catch(() => {}); }, 3000);
       return;
     }
   } catch (err) {
@@ -401,14 +370,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
   }
 });
-
-// Helper: allow non-admins to press Jorm buttons if you gate with standard role
-function isAllowedByStandardForJorm(interaction) {
-  const gs = getGuildSettings(interaction.guildId);
-  const roleToCheck = gs?.standard_role_id;
-  if (!roleToCheck) return true;
-  return interaction.member.roles.cache.has(roleToCheck);
-}
 
 // --------- Slash command router ----------
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -442,9 +403,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
       case 'setup':           await handleSetup(interaction); break;
       case 'setcommandrole':  await handleSetCommandRole(interaction); break;
       case 'setalert':        await handleSetAlert(interaction); break;
-      case 'playeradd':       await handlePlayerAdd(interaction); break;
-      case 'playerupdate':    await handlePlayerUpdate(interaction); break;
-      case 'player':          await handlePlayer(interaction); break;
+
+      // NEW player commands
+      case 'addplayer':       await handleAddPlayer(interaction); break;
+      case 'updateplayer':    await handleUpdatePlayer(interaction); break;
+      case 'player':          await handlePlayerLookup(interaction); break;
+
       default:
         await interaction.reply({ ephemeral: true, content: 'Unknown command.' });
     }
@@ -468,7 +432,6 @@ async function cleanupStaleApproachingMessages(guildId, bossNames) {
   const channel = await guild.channels.fetch(gs.alert_channel_id).catch(() => null);
   if (!channel || !('messages' in channel)) return;
 
-  // Build a quick lookup of current windows for each requested boss so we can keep the valid one
   const rows = getAllBossRowsForGuild(guildId);
   const currentByBoss = new Map();
   for (const name of bossNames) {
@@ -478,12 +441,11 @@ async function cleanupStaleApproachingMessages(guildId, bossNames) {
     currentByBoss.set(name, w || null);
   }
 
-  // Fetch a chunk of recent messages and remove outdated “Spawn Approaching - <boss>”
   const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
   if (!recent) return;
 
   for (const name of bossNames) {
-    const window = currentByBoss.get(name); // may be null if timer cleared
+    const window = currentByBoss.get(name);
     const keepStart = window ? `<t:${toUnixSeconds(window.start)}:f>` : null;
     const keepEnd   = window ? `<t:${toUnixSeconds(window.end)}:f>`   : null;
 
@@ -494,7 +456,6 @@ async function cleanupStaleApproachingMessages(guildId, bossNames) {
     });
 
     for (const msg of candidates) {
-      // If we have a current window, keep messages that show that exact start/end; otherwise delete all
       let isCurrent = false;
       if (window && msg.embeds?.length) {
         outer: for (const e of msg.embeds) {
@@ -510,24 +471,20 @@ async function cleanupStaleApproachingMessages(guildId, bossNames) {
       }
       if (!isCurrent) {
         await msg.delete().catch(() => {});
-        // time-based cleanup will mark deleted later if present in DB
       }
     }
   }
 }
 
-// --------- Scheduler: update dashboard + role pings + DMs + cleanup ----------
+// --------- Scheduler ----------
 async function tickOnce(onlyGuildId = null) {
-  const guilds = onlyGuildId
-    ? [getGuildSettings(onlyGuildId)].filter(Boolean)
-    : getAllGuildSettings();
-
+  const guilds = onlyGuildId ? [getGuildSettings(onlyGuildId)].filter(Boolean) : getAllGuildSettings();
   const now = nowUtc();
 
   for (const gs of guilds) {
     if (!gs.alert_channel_id) continue;
 
-    // 1) Update dashboard message if configured
+    // 1) Update dashboard
     const hours = gs.upcoming_hours ?? 3;
     if (gs.alert_message_id) {
       try {
@@ -544,10 +501,10 @@ async function tickOnce(onlyGuildId = null) {
           const newMsg = await channel.send({ embeds: [embed] });
           upsertGuildSettings(gs.guild_id, { alert_message_id: newMsg.id });
         }
-      } catch { /* ignore per-guild errors */ }
+      } catch {}
     }
 
-    // 2) Ping role if a window is approaching (and record the message for later cleanup)
+    // 2) Role pings
     if (gs.ping_role_id && gs.ping_minutes) {
       const rows = getAllBossRowsForGuild(gs.guild_id);
       const channelGuild = await client.guilds.fetch(gs.guild_id).catch(() => null);
@@ -580,34 +537,22 @@ async function tickOnce(onlyGuildId = null) {
               ]
             });
 
-            // Record message so we can auto-delete it 30 minutes after window end
             const deleteAfter = w.end.plus({ minutes: 30 });
-            recordChannelPingMessage(
-              gs.guild_id,
-              b.name,
-              windowKey,
-              gs.alert_channel_id,
-              sent.id,
-              deleteAfter.toISO()
-            );
-          } catch {
-            /* ignore send errors */
-          }
+            recordChannelPingMessage(gs.guild_id, b.name, windowKey, gs.alert_channel_id, sent.id, deleteAfter.toISO());
+          } catch {}
         }
       }
     }
 
-    // 3) DM alerts to subscribed users when their lead time hits
+    // 3) DMs to subscribed users
     try {
       const rows = getAllBossRowsForGuild(gs.guild_id);
-      const regs = listRegisteredUsers(gs.guild_id); // users with alert_minutes set
-
-      // For DMs we optionally include the Guild name in the embed footer
+      const regs = listRegisteredUsers(gs.guild_id);
       const guildObj = await client.guilds.fetch(gs.guild_id).catch(() => null);
 
       for (const reg of regs) {
         const subs = listUserSubscriptions(reg.user_id, gs.guild_id);
-        if (!subs || subs.length === 0) continue; // opt-in model: no subs, no DMs
+        if (!subs || subs.length === 0) continue;
 
         for (const b of rows) {
           if (!subs.includes(b.name)) continue;
@@ -619,7 +564,6 @@ async function tickOnce(onlyGuildId = null) {
           const windowKey = `${b.name}:${b.last_killed_at_utc}`;
           if (hasUserBeenAlerted(reg.user_id, gs.guild_id, b.name, windowKey)) continue;
 
-          // When the user's alert lead time hits
           const threshold = w.start.minus({ minutes: reg.alert_minutes || 30 });
           if (now >= threshold && now < w.start) {
             try {
@@ -629,27 +573,21 @@ async function tickOnce(onlyGuildId = null) {
               const embed = new EmbedBuilder()
                 .setTitle(`Spawn Approaching - ${b.name}`)
                 .addFields(
-                  { name: 'Window Start',
-                    value: `**Your Time:** <t:${toUnixSeconds(w.start)}:f>\n**Server Time (UTC):** ${fmtUtc(w.start)}` },
-                  { name: 'Window End',
-                    value: `**Your Time:** <t:${toUnixSeconds(w.end)}:f>\n**Server Time (UTC):** ${fmtUtc(w.end)}` }
+                  { name: 'Window Start', value: `**Your Time:** <t:${toUnixSeconds(w.start)}:f>\n**Server Time (UTC):** ${fmtUtc(w.start)}` },
+                  { name: 'Window End', value: `**Your Time:** <t:${toUnixSeconds(w.end)}:f>\n**Server Time (UTC):** ${fmtUtc(w.end)}` }
                 )
                 .setFooter({ text: guildObj ? `Guild: ${guildObj.name}` : 'Boss Alert' })
                 .setColor(0x2ECC71);
 
               await user.send({ embeds: [embed] }).catch(() => {});
               markUserAlerted(reg.user_id, gs.guild_id, b.name, windowKey);
-            } catch {
-              // ignore DM errors (user has DMs off, left the server, etc.)
-            }
+            } catch {}
           }
         }
       }
-    } catch {
-      // ignore per-guild DM errors
-    }
+    } catch {}
 
-    // 4) Cleanup: delete "Spawn Approaching" messages 30 minutes after window end
+    // 4) Cleanup old "approaching" messages
     try {
       const due = listChannelMessagesDueForDeletion(gs.guild_id, now.toISO());
       if (due && due.length) {
@@ -664,31 +602,24 @@ async function tickOnce(onlyGuildId = null) {
               continue;
             }
             const msg = await ch.messages.fetch(row.message_id).catch(() => null);
-            if (msg) {
-              await msg.delete().catch(() => {});
-            }
+            if (msg) await msg.delete().catch(() => {});
           } finally {
-            // Mark deleted regardless of actual delete result to avoid endless retries
             markChannelAlertDeleted(gs.guild_id, row.boss_name, row.window_key);
           }
         }
       }
-    } catch {
-      /* ignore cleanup errors */
-    }
+    } catch {}
   }
 }
 
-// Regular tick (every minute)
 setInterval(() => { tickOnce().catch(() => {}); }, 60 * 1000);
 
-// Immediate per-guild refresh when handlers ask for it
 bus.on('forceUpdate', (payload) => {
   const gid = payload?.guildId ?? null;
   tickOnce(gid).catch(() => {});
 });
 
-// NEW: listen for event-driven stale cleanup
+// Keep it — event-driven stale cleanup
 bus.on('cleanupStaleApproaching', (payload) => {
   const guildId = payload?.guildId;
   if (!guildId) return;
@@ -699,7 +630,7 @@ bus.on('cleanupStaleApproaching', (payload) => {
   cleanupStaleApproachingMessages(guildId, names).catch(() => {});
 });
 
-// NEW: keep Jorm messages fresh
+// Keep Jorm messages fresh
 bus.on('jormUpdate', (payload) => {
   const gid = payload?.guildId;
   if (!gid) return;

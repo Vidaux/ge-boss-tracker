@@ -99,29 +99,32 @@ CREATE TABLE IF NOT EXISTS channel_alerts (
   PRIMARY KEY (guild_id, boss_name, window_key)
 );
 
-/* Jorm player tracking (extensible for more columns later) */
+/* Jorm player tracking - keyed by (guild_id, family_name) */
 CREATE TABLE IF NOT EXISTS jorm_players (
   guild_id TEXT,
-  user_id TEXT,
+  family_name TEXT,
   display_name TEXT,
   has_belt INTEGER DEFAULT 0,
   has_ring INTEGER DEFAULT 0,
   used_key_count INTEGER DEFAULT 0,
   queue_order INTEGER,
-  PRIMARY KEY (guild_id, user_id)
+  /* future-proof armor fields */
+  mcc1 TEXT,
+  mcc2 TEXT,
+  mcc3 TEXT,
+  PRIMARY KEY (guild_id, family_name)
 );
 
 CREATE TABLE IF NOT EXISTS jorm_queue_history (
   guild_id TEXT,
-  user_id TEXT,
+  family_name TEXT,
   action TEXT, /* 'used'|'skipped' */
   ts_utc TEXT
 );
 `);
 
 /* -------------------------
-   Lightweight add-column migrations
-   (MUST run before creating indexes that use the new columns)
+   Lightweight add-column migrations (idempotent)
 ------------------------- */
 for (const sql of [
   `ALTER TABLE bosses ADD COLUMN parts_json TEXT`,
@@ -132,25 +135,31 @@ for (const sql of [
   `ALTER TABLE bosses ADD COLUMN reset_respawn_min_hours REAL`,
   `ALTER TABLE bosses ADD COLUMN reset_respawn_max_hours REAL`,
   `ALTER TABLE bosses ADD COLUMN last_trigger_kind TEXT`,
-  // channel_alerts cleanup metadata columns
   `ALTER TABLE channel_alerts ADD COLUMN channel_id TEXT`,
   `ALTER TABLE channel_alerts ADD COLUMN message_id TEXT`,
   `ALTER TABLE channel_alerts ADD COLUMN delete_after_utc TEXT`,
   `ALTER TABLE channel_alerts ADD COLUMN deleted INTEGER`,
-  // jorm settings/message ids (idempotent)
+  /* Jorm settings/message IDs */
   `ALTER TABLE guild_settings ADD COLUMN jorm_channel_id TEXT`,
   `ALTER TABLE guild_settings ADD COLUMN jorm_queue_message_id TEXT`,
   `ALTER TABLE guild_settings ADD COLUMN jorm_ring_message_id TEXT`,
-  // jorm players extra columns (older DBs might lack these)
+  /* Jorm players columns for new scheme */
+  `ALTER TABLE jorm_players ADD COLUMN family_name TEXT`,
   `ALTER TABLE jorm_players ADD COLUMN used_key_count INTEGER`,
-  `ALTER TABLE jorm_players ADD COLUMN queue_order INTEGER`
+  `ALTER TABLE jorm_players ADD COLUMN queue_order INTEGER`,
+  `ALTER TABLE jorm_players ADD COLUMN mcc1 TEXT`,
+  `ALTER TABLE jorm_players ADD COLUMN mcc2 TEXT`,
+  `ALTER TABLE jorm_players ADD COLUMN mcc3 TEXT`,
+  /* Jorm history uses family_name */
+  `ALTER TABLE jorm_queue_history ADD COLUMN family_name TEXT`
 ]) {
-  try { db.prepare(sql).run(); } catch { /* column already exists */ }
+  try { db.prepare(sql).run(); } catch { /* already exists */ }
 }
 
-/* -------------------------
-   Indexes (after columns exist)
-------------------------- */
+/* Ensure uniqueness by (guild_id, family_name) even on older DBs */
+try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_jorm_family ON jorm_players(guild_id, family_name)`); } catch {}
+
+/* Indexes */
 try { db.exec(`CREATE INDEX IF NOT EXISTS idx_bosses_name_nocase ON bosses(name COLLATE NOCASE);`); } catch {}
 try { db.exec(`CREATE INDEX IF NOT EXISTS idx_gbs_guild_boss ON guild_boss_state(guild_id, boss_name);`); } catch {}
 try { db.exec(`CREATE INDEX IF NOT EXISTS idx_channel_alerts_due ON channel_alerts(guild_id, delete_after_utc);`); } catch {}
@@ -160,9 +169,7 @@ try { db.exec(`CREATE INDEX IF NOT EXISTS idx_jorm_queue_order ON jorm_players(g
 // Seeding bosses (per-location expansion)
 // --------------------------
 function asLocationArray(loc) {
-  if (Array.isArray(loc)) {
-    return loc.map(s => String(s).trim()).filter(Boolean);
-  }
+  if (Array.isArray(loc)) return loc.map(s => String(s).trim()).filter(Boolean);
   const raw = String(loc || '').trim();
   if (!raw) return [];
   return raw.split('|').map(s => s.trim()).filter(Boolean);
@@ -181,7 +188,6 @@ const insertBoss = db.prepare(`
 for (const b of bossesSeed) {
   const locs = asLocationArray(b.location);
   const multi = locs.length > 1;
-
   const entries = (multi ? locs : [locs[0] ?? '']).map(loc => {
     const name = multi ? `${b.name} - ${loc}` : b.name;
     return {
@@ -198,21 +204,20 @@ for (const b of bossesSeed) {
       reset_respawn_max_hours: b.reset_respawn_max_hours ?? null
     };
   });
-
   for (const row of entries) insertBoss.run(row);
 }
 
-// Cleanup: remove base-name rows for multi-location bosses
+// Remove base-name rows for multi-location bosses
 try {
   const multiBaseNames = bossesSeed
     .filter(b => asLocationArray(b.location).length > 1)
     .map(b => b.name);
   const delStmt = db.prepare(`DELETE FROM bosses WHERE name = ? COLLATE NOCASE`);
   for (const base of multiBaseNames) delStmt.run(base);
-} catch { /* ignore */ }
+} catch {}
 
 // --------------------------
-// One-time backfill: migrate legacy global kills -> per-guild
+// One-time backfill: legacy global -> per-guild
 // --------------------------
 (function backfillGlobalKillsToGuildStateOnce() {
   const any = db.prepare(`SELECT 1 FROM guild_boss_state LIMIT 1`).get();
@@ -225,7 +230,6 @@ try {
     SELECT name, last_killed_at_utc, window_notif_key, last_trigger_kind
     FROM bosses WHERE last_killed_at_utc IS NOT NULL
   `).all();
-
   if (!bossesWithKills.length) return;
 
   const upsert = db.prepare(`
@@ -282,13 +286,10 @@ export function resetBoss(guildId, bossName) {
   return info.changes > 0;
 }
 
-// STATIC meta by name (no guild state)
+// STATIC meta by name
 export function getBossByName(bossName) {
   const normalized = String(bossName || '').trim().replace(/\s+/g, ' ');
-  const row = db.prepare(`
-    SELECT * FROM bosses
-     WHERE name = ? COLLATE NOCASE
-  `).get(normalized);
+  const row = db.prepare(`SELECT * FROM bosses WHERE name = ? COLLATE NOCASE`).get(normalized);
   if (!row) return null;
   return {
     ...row,
@@ -299,13 +300,11 @@ export function getBossByName(bossName) {
   };
 }
 
-// STATIC list
 export function listBosses() {
   const rows = db.prepare(`SELECT name FROM bosses ORDER BY name`).all();
   return rows.map(r => r.name);
 }
 
-// GUILD-SCOPED joins
 export function getBossForGuild(guildId, bossName) {
   const normalized = String(bossName || '').trim().replace(/\s+/g, ' ');
   const row = db.prepare(`
@@ -366,10 +365,8 @@ export function listKilledBosses(guildId) {
   return rows.map(r => r.boss_name);
 }
 
-/** Compute window for a row */
 export function computeWindow(row) {
   if (!row?.last_killed_at_utc) return null;
-
   const base = DateTime.fromISO(row.last_killed_at_utc, { zone: 'utc' });
 
   if (
@@ -391,7 +388,6 @@ export function computeWindow(row) {
   return null;
 }
 
-/** Apply a server reset for a single guild. */
 export function applyServerReset(guildId, utcIsoString) {
   const eligible = db.prepare(`
     SELECT name FROM bosses
@@ -516,27 +512,16 @@ export function getCommandRole(guildId, commandName) {
 // User alerts (per-user lead time)
 // --------------------------
 export function upsertUserAlertMinutes(userId, guildId, minutes) {
-  const exists = db.prepare(`
-    SELECT 1 FROM user_registrations WHERE user_id = ? AND guild_id = ?
-  `).get(userId, guildId);
+  const exists = db.prepare(`SELECT 1 FROM user_registrations WHERE user_id = ? AND guild_id = ?`).get(userId, guildId);
   if (exists) {
-    db.prepare(`
-      UPDATE user_registrations
-         SET alert_minutes = ?
-       WHERE user_id = ? AND guild_id = ?
-    `).run(minutes, userId, guildId);
+    db.prepare(`UPDATE user_registrations SET alert_minutes = ? WHERE user_id = ? AND guild_id = ?`).run(minutes, userId, guildId);
   } else {
-    db.prepare(`
-      INSERT INTO user_registrations (user_id, guild_id, timezone, alert_minutes)
-      VALUES (?, ?, NULL, ?)
-    `).run(userId, guildId, minutes);
+    db.prepare(`INSERT INTO user_registrations (user_id, guild_id, timezone, alert_minutes) VALUES (?, ?, NULL, ?)`).run(userId, guildId, minutes);
   }
 }
 
 export function getUserRegistration(userId, guildId) {
-  return db.prepare(`
-    SELECT * FROM user_registrations WHERE user_id = ? AND guild_id = ?
-  `).get(userId, guildId) || null;
+  return db.prepare(`SELECT * FROM user_registrations WHERE user_id = ? AND guild_id = ?`).get(userId, guildId) || null;
 }
 
 export function markUserAlerted(userId, guildId, bossName, windowKey) {
@@ -555,63 +540,40 @@ export function hasUserBeenAlerted(userId, guildId, bossName, windowKey) {
 }
 
 // --------------------------
-// Subscriptions (per-boss opt-in)
+// Subscriptions
 // --------------------------
 export function addSubscription(userId, guildId, bossName) {
-  db.prepare(`
-    INSERT OR IGNORE INTO user_subscriptions (user_id, guild_id, boss_name)
-    VALUES (?, ?, ?)
-  `).run(userId, guildId, bossName);
+  db.prepare(`INSERT OR IGNORE INTO user_subscriptions (user_id, guild_id, boss_name) VALUES (?, ?, ?)`).run(userId, guildId, bossName);
 }
 
 export function removeSubscription(userId, guildId, bossName) {
-  const info = db.prepare(`
-    DELETE FROM user_subscriptions
-     WHERE user_id = ? AND guild_id = ? AND boss_name = ?
-  `).run(userId, guildId, bossName);
+  const info = db.prepare(`DELETE FROM user_subscriptions WHERE user_id = ? AND guild_id = ? AND boss_name = ?`).run(userId, guildId, bossName);
   return info.changes > 0;
 }
 
 export function listUserSubscriptions(userId, guildId) {
-  const rows = db.prepare(`
-    SELECT boss_name FROM user_subscriptions
-     WHERE user_id = ? AND guild_id = ?
-     ORDER BY boss_name
-  `).all(userId, guildId);
+  const rows = db.prepare(`SELECT boss_name FROM user_subscriptions WHERE user_id = ? AND guild_id = ? ORDER BY boss_name`).all(userId, guildId);
   return rows.map(r => r.boss_name);
 }
 
 export function userHasAnySubscriptions(userId, guildId) {
-  const row = db.prepare(`
-    SELECT 1 FROM user_subscriptions WHERE user_id = ? AND guild_id = ? LIMIT 1
-  `).get(userId, guildId);
+  const row = db.prepare(`SELECT 1 FROM user_subscriptions WHERE user_id = ? AND guild_id = ? LIMIT 1`).get(userId, guildId);
   return !!row;
 }
 
 export function listRegisteredUsers(guildId) {
-  const rows = db.prepare(`
-    SELECT user_id, alert_minutes FROM user_registrations
-     WHERE guild_id = ?
-  `).all(guildId);
-  return rows;
+  return db.prepare(`SELECT user_id, alert_minutes FROM user_registrations WHERE guild_id = ?`).all(guildId);
 }
 
 // --------------------------
 // Channel ping tracking + cleanup helpers
 // --------------------------
 export function markChannelPinged(guildId, bossName, windowKey) {
-  db.prepare(`
-    INSERT OR REPLACE INTO channel_alerts (guild_id, boss_name, window_key, pinged)
-    VALUES (?, ?, ?, 1)
-  `).run(guildId, bossName, windowKey);
+  db.prepare(`INSERT OR REPLACE INTO channel_alerts (guild_id, boss_name, window_key, pinged) VALUES (?, ?, ?, 1)`).run(guildId, bossName, windowKey);
 }
 
 export function hasChannelBeenPinged(guildId, bossName, windowKey) {
-  const row = db.prepare(`
-    SELECT pinged
-      FROM channel_alerts
-     WHERE guild_id = ? AND boss_name = ? AND window_key = ?
-  `).get(guildId, bossName, windowKey);
+  const row = db.prepare(`SELECT pinged FROM channel_alerts WHERE guild_id = ? AND boss_name = ? AND window_key = ?`).get(guildId, bossName, windowKey);
   return !!row?.pinged;
 }
 
@@ -642,15 +604,11 @@ export function listChannelMessagesDueForDeletion(guildId, nowIso) {
 }
 
 export function markChannelAlertDeleted(guildId, bossName, windowKey) {
-  db.prepare(`
-    UPDATE channel_alerts
-       SET deleted = 1
-     WHERE guild_id = ? AND boss_name = ? AND window_key = ?
-  `).run(guildId, bossName, windowKey);
+  db.prepare(`UPDATE channel_alerts SET deleted = 1 WHERE guild_id = ? AND boss_name = ? AND window_key = ?`).run(guildId, bossName, windowKey);
 }
 
 // --------------------------
-// Jorm players (extensible)
+// Jorm players (Family Name keyed)
 // --------------------------
 function getMaxQueueOrder(guildId) {
   const row = db.prepare(`SELECT MAX(queue_order) as maxq FROM jorm_players WHERE guild_id = ? AND has_belt = 0`).get(guildId);
@@ -659,22 +617,22 @@ function getMaxQueueOrder(guildId) {
 
 function normalizeQueue(guildId) {
   const rows = db.prepare(`
-    SELECT user_id FROM jorm_players
+    SELECT family_name FROM jorm_players
      WHERE guild_id = ? AND has_belt = 0
      ORDER BY queue_order, display_name COLLATE NOCASE
   `).all(guildId);
   const tx = db.transaction(() => {
     let n = 1;
     for (const r of rows) {
-      db.prepare(`UPDATE jorm_players SET queue_order = ? WHERE guild_id = ? AND user_id = ?`)
-        .run(n++, guildId, r.user_id);
+      db.prepare(`UPDATE jorm_players SET queue_order = ? WHERE guild_id = ? AND family_name = ?`).run(n++, guildId, r.family_name);
     }
   });
   tx();
 }
 
-export function upsertJormPlayer(guildId, userId, displayName, { has_belt = false, has_ring = false } = {}) {
-  const exists = db.prepare(`SELECT * FROM jorm_players WHERE guild_id = ? AND user_id = ?`).get(guildId, userId);
+export function upsertJormPlayer(guildId, familyName, { has_belt = false, has_ring = false } = {}) {
+  const displayName = familyName; // keep a display field (can diverge later)
+  const exists = db.prepare(`SELECT * FROM jorm_players WHERE guild_id = ? AND family_name = ?`).get(guildId, familyName);
 
   if (exists) {
     db.prepare(`
@@ -682,30 +640,30 @@ export function upsertJormPlayer(guildId, userId, displayName, { has_belt = fals
          SET display_name = ?,
              has_belt = ?,
              has_ring = ?
-       WHERE guild_id = ? AND user_id = ?
-    `).run(displayName, has_belt ? 1 : 0, has_ring ? 1 : 0, guildId, userId);
+       WHERE guild_id = ? AND family_name = ?
+    `).run(displayName, has_belt ? 1 : 0, has_ring ? 1 : 0, guildId, familyName);
 
-    // If they newly lost eligibility or gained it, adjust queue_order
-    const row = db.prepare(`SELECT has_belt, queue_order FROM jorm_players WHERE guild_id = ? AND user_id = ?`).get(guildId, userId);
+    // If belt status changed eligibility
+    const row = db.prepare(`SELECT has_belt, queue_order FROM jorm_players WHERE guild_id = ? AND family_name = ?`).get(guildId, familyName);
     if (row.has_belt) {
-      db.prepare(`UPDATE jorm_players SET queue_order = NULL WHERE guild_id = ? AND user_id = ?`).run(guildId, userId);
+      db.prepare(`UPDATE jorm_players SET queue_order = NULL WHERE guild_id = ? AND family_name = ?`).run(guildId, familyName);
       normalizeQueue(guildId);
     } else if (row.queue_order == null) {
       const next = getMaxQueueOrder(guildId) + 1;
-      db.prepare(`UPDATE jorm_players SET queue_order = ? WHERE guild_id = ? AND user_id = ?`).run(next, guildId, userId);
+      db.prepare(`UPDATE jorm_players SET queue_order = ? WHERE guild_id = ? AND family_name = ?`).run(next, guildId, familyName);
     }
   } else {
     let q = null;
     if (!has_belt) q = getMaxQueueOrder(guildId) + 1;
     db.prepare(`
-      INSERT INTO jorm_players (guild_id, user_id, display_name, has_belt, has_ring, used_key_count, queue_order)
-      VALUES (?, ?, ?, ?, ?, 0, ?)
-    `).run(guildId, userId, displayName, has_belt ? 1 : 0, has_ring ? 1 : 0, q);
+      INSERT INTO jorm_players (guild_id, family_name, display_name, has_belt, has_ring, used_key_count, queue_order, mcc1, mcc2, mcc3)
+      VALUES (?, ?, ?, ?, ?, 0, ?, NULL, NULL, NULL)
+    `).run(guildId, familyName, displayName, has_belt ? 1 : 0, has_ring ? 1 : 0, q);
   }
 }
 
-export function updateJormPlayer(guildId, userId, { has_belt = null, has_ring = null, display_name = null } = {}) {
-  const exists = db.prepare(`SELECT * FROM jorm_players WHERE guild_id = ? AND user_id = ?`).get(guildId, userId);
+export function updateJormPlayer(guildId, familyName, { has_belt = null, has_ring = null, display_name = null } = {}) {
+  const exists = db.prepare(`SELECT * FROM jorm_players WHERE guild_id = ? AND family_name = ?`).get(guildId, familyName);
   if (!exists) return false;
 
   const new_belt = (has_belt === null ? exists.has_belt : (has_belt ? 1 : 0));
@@ -717,16 +675,15 @@ export function updateJormPlayer(guildId, userId, { has_belt = null, has_ring = 
        SET display_name = ?,
            has_belt = ?,
            has_ring = ?
-     WHERE guild_id = ? AND user_id = ?
-  `).run(new_name, new_belt, new_ring, guildId, userId);
+     WHERE guild_id = ? AND family_name = ?
+  `).run(new_name, new_belt, new_ring, guildId, familyName);
 
-  // Queue adjustments
   if (new_belt) {
-    db.prepare(`UPDATE jorm_players SET queue_order = NULL WHERE guild_id = ? AND user_id = ?`).run(guildId, userId);
+    db.prepare(`UPDATE jorm_players SET queue_order = NULL WHERE guild_id = ? AND family_name = ?`).run(guildId, familyName);
     normalizeQueue(guildId);
   } else if (exists.queue_order == null) {
     const next = getMaxQueueOrder(guildId) + 1;
-    db.prepare(`UPDATE jorm_players SET queue_order = ? WHERE guild_id = ? AND user_id = ?`).run(next, guildId, userId);
+    db.prepare(`UPDATE jorm_players SET queue_order = ? WHERE guild_id = ? AND family_name = ?`).run(next, guildId, familyName);
   }
 
   return true;
@@ -734,7 +691,7 @@ export function updateJormPlayer(guildId, userId, { has_belt = null, has_ring = 
 
 export function listJormQueue(guildId) {
   return db.prepare(`
-    SELECT user_id, display_name, used_key_count, queue_order
+    SELECT family_name, display_name, used_key_count, queue_order
       FROM jorm_players
      WHERE guild_id = ? AND has_belt = 0
      ORDER BY queue_order, display_name COLLATE NOCASE
@@ -743,7 +700,7 @@ export function listJormQueue(guildId) {
 
 export function listJormPlayersWithoutRing(guildId) {
   return db.prepare(`
-    SELECT user_id, display_name
+    SELECT family_name, display_name
       FROM jorm_players
      WHERE guild_id = ? AND has_ring = 0
      ORDER BY display_name COLLATE NOCASE
@@ -752,7 +709,7 @@ export function listJormPlayersWithoutRing(guildId) {
 
 export function jormRotate(guildId, action /* 'used' | 'skipped' */) {
   const top = db.prepare(`
-    SELECT user_id, queue_order, used_key_count
+    SELECT family_name, queue_order, used_key_count
       FROM jorm_players
      WHERE guild_id = ? AND has_belt = 0
      ORDER BY queue_order
@@ -762,25 +719,23 @@ export function jormRotate(guildId, action /* 'used' | 'skipped' */) {
 
   const max = getMaxQueueOrder(guildId);
   const tx = db.transaction(() => {
-    // Move top to bottom
-    db.prepare(`UPDATE jorm_players SET queue_order = ? WHERE guild_id = ? AND user_id = ?`)
-      .run(max + 1, guildId, top.user_id);
+    db.prepare(`UPDATE jorm_players SET queue_order = ? WHERE guild_id = ? AND family_name = ?`)
+      .run(max + 1, guildId, top.family_name);
     if (action === 'used') {
-      db.prepare(`UPDATE jorm_players SET used_key_count = used_key_count + 1 WHERE guild_id = ? AND user_id = ?`)
-        .run(guildId, top.user_id);
+      db.prepare(`UPDATE jorm_players SET used_key_count = used_key_count + 1 WHERE guild_id = ? AND family_name = ?`)
+        .run(guildId, top.family_name);
     }
-    // Record history
-    db.prepare(`INSERT INTO jorm_queue_history (guild_id, user_id, action, ts_utc) VALUES (?, ?, ?, ?)`)
-      .run(guildId, top.user_id, action, DateTime.utc().toISO());
+    db.prepare(`INSERT INTO jorm_queue_history (guild_id, family_name, action, ts_utc) VALUES (?, ?, ?, ?)`)
+      .run(guildId, top.family_name, action, DateTime.utc().toISO());
     normalizeQueue(guildId);
   });
   tx();
-  return { rotated: true, user_id: top.user_id, action };
+  return { rotated: true, family_name: top.family_name, action };
 }
 
 export function jormUndo(guildId) {
   const last = db.prepare(`
-    SELECT rowid, user_id, action FROM jorm_queue_history
+    SELECT rowid, family_name, action FROM jorm_queue_history
      WHERE guild_id = ?
      ORDER BY rowid DESC
      LIMIT 1
@@ -788,41 +743,35 @@ export function jormUndo(guildId) {
   if (!last) return { undone: false };
 
   const tx = db.transaction(() => {
-    // Move that user back to top
     const minRow = db.prepare(`SELECT MIN(queue_order) as minq FROM jorm_players WHERE guild_id = ? AND has_belt = 0`).get(guildId);
     const newTop = (minRow?.minq ?? 1) - 1;
-    db.prepare(`UPDATE jorm_players SET queue_order = ? WHERE guild_id = ? AND user_id = ?`).run(newTop, guildId, last.user_id);
+    db.prepare(`UPDATE jorm_players SET queue_order = ? WHERE guild_id = ? AND family_name = ?`).run(newTop, guildId, last.family_name);
     if (last.action === 'used') {
-      db.prepare(`UPDATE jorm_players SET used_key_count = MAX(used_key_count - 1, 0) WHERE guild_id = ? AND user_id = ?`).run(guildId, last.user_id);
+      db.prepare(`UPDATE jorm_players SET used_key_count = MAX(used_key_count - 1, 0) WHERE guild_id = ? AND family_name = ?`).run(guildId, last.family_name);
     }
-    // Remove history row
     db.prepare(`DELETE FROM jorm_queue_history WHERE rowid = ?`).run(last.rowid);
     normalizeQueue(guildId);
   });
   tx();
-  return { undone: true, user_id: last.user_id };
+  return { undone: true, family_name: last.family_name };
 }
 
-// --- Player lookups for /player (dynamic) ---
-export function getJormPlayerByUserId(guildId, userId) {
-  const row = db.prepare(`
-    SELECT * FROM jorm_players
-     WHERE guild_id = ? AND user_id = ?
-     LIMIT 1
-  `).get(guildId, userId);
+// --- Player lookups for /player ---
+export function getJormPlayerByFamily(guildId, familyName) {
+  const row = db.prepare(`SELECT * FROM jorm_players WHERE guild_id = ? AND family_name = ? LIMIT 1`).get(guildId, familyName);
   return row || null;
 }
 
 export function findJormPlayersByName(guildId, nameFragment) {
   const like = `%${String(nameFragment || '').trim()}%`;
-  const rows = db.prepare(`
-    SELECT * FROM jorm_players
+  return db.prepare(`
+    SELECT family_name, display_name
+      FROM jorm_players
      WHERE guild_id = ?
-       AND display_name LIKE ? COLLATE NOCASE
+       AND (family_name LIKE ? COLLATE NOCASE OR display_name LIKE ? COLLATE NOCASE)
      ORDER BY display_name
      LIMIT 10
-  `).all(guildId, like);
-  return rows || [];
+  `).all(guildId, like, like);
 }
 
 export default db;

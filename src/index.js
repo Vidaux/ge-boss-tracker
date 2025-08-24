@@ -26,7 +26,8 @@ import {
   handleSetAlert,
   handleServerReset,
   handlePlayerAdd,
-  handlePlayerUpdate
+  handlePlayerUpdate,
+  handlePlayer
 } from './commands/handlers.js';
 
 import {
@@ -443,6 +444,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       case 'setalert':        await handleSetAlert(interaction); break;
       case 'playeradd':       await handlePlayerAdd(interaction); break;
       case 'playerupdate':    await handlePlayerUpdate(interaction); break;
+      case 'player':          await handlePlayer(interaction); break;
       default:
         await interaction.reply({ ephemeral: true, content: 'Unknown command.' });
     }

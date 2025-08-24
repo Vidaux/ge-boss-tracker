@@ -21,7 +21,9 @@ import {
   applyServerReset,
   listKilledBosses,
   upsertJormPlayer,
-  updateJormPlayer
+  updateJormPlayer,
+  getJormPlayerByUserId,
+  findJormPlayersByName
 } from '../db.js';
 
 import {
@@ -576,8 +578,6 @@ export async function handleSetup(interaction) {
   }
 
   const gs = getGuildSettings(interaction.guildId) || {};
-
-  // Main setup (Dashboard + pings)
   const emb = new EmbedBuilder()
     .setTitle('Boss Alerts - Setup Wizard')
     .setDescription([
@@ -586,35 +586,32 @@ export async function handleSetup(interaction) {
       '2) **Ping Role** to mention when a window is near',
       '3) **Lookahead Hours** for the dashboard',
       '4) **Ping Lead Minutes** before a window opens',
+      '5) **Jorm Messages Channel** for Queue & Ring lists',
       '',
-      'Click **Create/Update Dashboard Message** when you’re done.',
-      '',
-      '➕ Jorm settings are sent in a separate panel right after this one to keep things tidy.'
+      'Click **Create/Update Dashboard Message** and/or **Create/Update Jorm Messages** when you’re done.'
     ].join('\n'))
     .addFields(
       { name: 'Current Alert Channel', value: gs.alert_channel_id ? `<#${gs.alert_channel_id}>` : '-', inline: true },
       { name: 'Current Ping Role', value: gs.ping_role_id ? `<@&${gs.ping_role_id}>` : '-', inline: true },
       { name: 'Lookahead Hours', value: String(gs.upcoming_hours ?? 3), inline: true },
-      { name: 'Ping Lead Minutes', value: String(gs.ping_minutes ?? 30), inline: true }
+      { name: 'Ping Lead Minutes', value: String(gs.ping_minutes ?? 30), inline: true },
+      { name: 'Jorm Messages Channel', value: gs.jorm_channel_id ? `<#${gs.jorm_channel_id}>` : '-', inline: true }
     )
     .setColor(0x2ECC71);
 
-  // IMPORTANT: use setChannelTypes (not addChannelTypes), and keep total rows ≤ 5
   const row1 = new ActionRowBuilder().addComponents(
     new ChannelSelectMenuBuilder()
       .setCustomId('setup:channel')
       .setPlaceholder('Select alert channel')
-      .setChannelTypes(ChannelType.GuildText)
+      .addChannelTypes(ChannelType.GuildText)
       .setMinValues(1).setMaxValues(1)
   );
-
   const row2 = new ActionRowBuilder().addComponents(
     new RoleSelectMenuBuilder()
       .setCustomId('setup:role')
       .setPlaceholder('Select ping role (optional)')
       .setMinValues(0).setMaxValues(1)
   );
-
   const row3 = new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId('setup:hours')
@@ -622,7 +619,6 @@ export async function handleSetup(interaction) {
       .addOptions([1,3,6,12,24].map(h => ({ label: `${h} hour${h===1?'':'s'}`, value: String(h) })))
       .setMinValues(1).setMaxValues(1)
   );
-
   const row4 = new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId('setup:minutes')
@@ -630,7 +626,6 @@ export async function handleSetup(interaction) {
       .addOptions([5,10,15,30,60,120].map(m => ({ label: `${m} minutes`, value: String(m) })))
       .setMinValues(1).setMaxValues(1)
   );
-
   const row5 = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId('setup:make_message')
@@ -638,33 +633,14 @@ export async function handleSetup(interaction) {
       .setStyle(ButtonStyle.Primary)
   );
 
-  // Send message #1 (5 rows max)
-  await interaction.reply({
-    embeds: [emb],
-    components: [row1, row2, row3, row4, row5],
-    ephemeral: true
-  });
-
-  // Jorm panel in a separate ephemeral follow-up
-  const jormEmb = new EmbedBuilder()
-    .setTitle('Jorm Settings')
-    .setDescription([
-      'Configure where to post the **Jorm Key Queue** and **Ring FW List**.',
-      '',
-      `Current Jorm Channel: ${gs.jorm_channel_id ? `<#${gs.jorm_channel_id}>` : '-'}`,
-      '',
-      'After selecting a channel, click **Create/Update Jorm Messages**.'
-    ].join('\n'))
-    .setColor(0x3498DB);
-
+  // NEW: Jorm message channel + creation button
   const rowJormChannel = new ActionRowBuilder().addComponents(
     new ChannelSelectMenuBuilder()
       .setCustomId('setup:jorm_channel')
       .setPlaceholder('Select channel for Jorm Queue & Ring FW')
-      .setChannelTypes(ChannelType.GuildText)
+      .addChannelTypes(ChannelType.GuildText)
       .setMinValues(1).setMaxValues(1)
   );
-
   const rowJormBtn = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId('setup:make_jorm')
@@ -672,9 +648,9 @@ export async function handleSetup(interaction) {
       .setStyle(ButtonStyle.Secondary)
   );
 
-  await interaction.followUp({
-    embeds: [jormEmb],
-    components: [rowJormChannel, rowJormBtn],
+  return interaction.reply({
+    embeds: [emb],
+    components: [row1, row2, row3, row4, row5, rowJormChannel, rowJormBtn],
     ephemeral: true
   });
 }
@@ -729,4 +705,110 @@ export async function handlePlayerUpdate(interaction) {
     ephemeral: true,
     content: `Updated **${user}**. Belt: ${belt ?? 'no change'}, Ring: ${ring ?? 'no change'}.`
   });
+}
+
+// ---------- /player (dynamic profile) ----------
+function labelizeColumn(col) {
+  const known = {
+    has_belt: 'Jormongand Belt',
+    has_ring: 'Montoro Skull Ring',
+    used_key_count: 'Keys Used',
+    display_name: 'Display Name'
+  };
+  if (known[col]) return known[col];
+  return col
+    .split('_')
+    .map(s => s.charAt(0).toUpperCase() + s.slice(1))
+    .join(' ');
+}
+
+function formatValue(v) {
+  if (v === null || v === undefined) return '—';
+  if (typeof v === 'number') return String(v);
+  if (typeof v === 'string') {
+    const lc = v.toLowerCase();
+    if (lc === 'true' || lc === 'false') return lc === 'true' ? 'Yes' : 'No';
+    return v;
+  }
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+  return String(v);
+}
+
+export async function handlePlayer(interaction) {
+  if (!isAllowedForStandard(interaction, 'player')) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /player.' });
+  }
+
+  const targetUser = interaction.options.getUser('user', false);
+  const nameQuery = interaction.options.getString('name', false);
+
+  if (!targetUser && !nameQuery) {
+    return interaction.reply({
+      ephemeral: true,
+      content: 'Provide either **user** or **name**. Example: `/player user:@Somebody` or `/player name:Some`'
+    });
+  }
+
+  let row = null;
+  let multiple = [];
+
+  if (targetUser) {
+    row = getJormPlayerByUserId(interaction.guildId, targetUser.id);
+    if (!row) {
+      return interaction.reply({
+        ephemeral: true,
+        content: `No player record found for ${targetUser}. Use **/playeradd** to add them.`
+      });
+    }
+  } else {
+    multiple = findJormPlayersByName(interaction.guildId, nameQuery);
+    if (multiple.length === 0) {
+      return interaction.reply({
+        ephemeral: true,
+        content: `No players matched \`${nameQuery}\`.`
+      });
+    }
+    if (multiple.length > 1) {
+      const list = multiple
+        .map(p => `• ${p.display_name || p.user_id} (<@${p.user_id}>)`)
+        .join('\n');
+      return interaction.reply({
+        ephemeral: true,
+        embeds: [
+          new EmbedBuilder()
+            .setTitle('Multiple matches')
+            .setDescription(list)
+            .setFooter({ text: 'Tip: re-run /player with the user picker to disambiguate.' })
+            .setColor(0x95A5A6)
+        ]
+      });
+    }
+    row = multiple[0] || null;
+  }
+
+  const exclude = new Set(['guild_id', 'user_id']); // show all other columns
+  const fields = [];
+
+  // Always show mention & id first
+  fields.push({
+    name: 'Discord',
+    value: `<@${row.user_id}> \n\`${row.user_id}\``,
+    inline: true
+  });
+
+  for (const [col, val] of Object.entries(row)) {
+    if (exclude.has(col)) continue;
+    fields.push({
+      name: labelizeColumn(col),
+      value: formatValue(val),
+      inline: true
+    });
+  }
+
+  const emb = new EmbedBuilder()
+    .setTitle(`Player: ${row.display_name || row.user_id}`)
+    .addFields(fields)
+    .setColor(0x00A8FF);
+
+  return interaction.reply({ embeds: [emb], ephemeral: true });
 }

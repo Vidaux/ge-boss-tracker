@@ -1,4 +1,4 @@
-// src/commands/registerCommands.js
+// registerCommands.js
 import 'dotenv/config';
 import { REST, Routes, SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
 
@@ -154,8 +154,7 @@ const gateableCommands = [
   'status', 'details', 'drops', 'killed',
   'subscribe', 'unsubscribe', 'subscriptions',
   'upcoming', 'reset', 'serverreset', 'setup',
-  // NEW: player management
-  'playeradd', 'playerupdate'
+  'player', 'playeradd', 'playerupdate'
 ];
 
 commands.push(
@@ -207,25 +206,67 @@ commands.push(
     .setDMPermission(false)
 );
 
-/** Standalone: /playeradd */
+/** /playeradd */
 commands.push(
   new SlashCommandBuilder()
     .setName('playeradd')
-    .setDescription('Add a player to the tracked list (belt/ring flags optional)')
-    .addUserOption(o => o.setName('user').setDescription('Discord user').setRequired(true))
-    .addBooleanOption(o => o.setName('belt').setDescription('Has Jormongand Belt?').setRequired(false))
-    .addBooleanOption(o => o.setName('ring').setDescription('Has Montoro Skull Ring?').setRequired(false))
+    .setDescription('Add a player to the list (Jorm items now; extensible later)')
+    .addUserOption(o =>
+      o.setName('user')
+       .setDescription('Discord user')
+       .setRequired(true)
+    )
+    .addBooleanOption(o =>
+      o.setName('belt')
+       .setDescription('Has Jormongand Belt? (true/false)')
+       .setRequired(false)
+    )
+    .addBooleanOption(o =>
+      o.setName('ring')
+       .setDescription('Has Montoro Skull Ring? (true/false)')
+       .setRequired(false)
+    )
     .setDMPermission(false)
 );
 
-/** Standalone: /playerupdate */
+/** /playerupdate */
 commands.push(
   new SlashCommandBuilder()
     .setName('playerupdate')
-    .setDescription('Update a player’s belt/ring flags')
-    .addUserOption(o => o.setName('user').setDescription('Discord user').setRequired(true))
-    .addBooleanOption(o => o.setName('belt').setDescription('Has Jormongand Belt?').setRequired(false))
-    .addBooleanOption(o => o.setName('ring').setDescription('Has Montoro Skull Ring?').setRequired(false))
+    .setDescription('Update a player (belt/ring etc.)')
+    .addUserOption(o =>
+      o.setName('user')
+       .setDescription('Discord user')
+       .setRequired(true)
+    )
+    .addBooleanOption(o =>
+      o.setName('belt')
+       .setDescription('Has Jormongand Belt? (true/false)')
+       .setRequired(false)
+    )
+    .addBooleanOption(o =>
+      o.setName('ring')
+       .setDescription('Has Montoro Skull Ring? (true/false)')
+       .setRequired(false)
+    )
+    .setDMPermission(false)
+);
+
+/** /player (dynamic profile) */
+commands.push(
+  new SlashCommandBuilder()
+    .setName('player')
+    .setDescription('Show tracked details for a player')
+    .addUserOption(o =>
+      o.setName('user')
+       .setDescription('Select a Discord user')
+       .setRequired(false)
+    )
+    .addStringOption(o =>
+      o.setName('name')
+       .setDescription('Search by display name (case-insensitive)')
+       .setRequired(false)
+    )
     .setDMPermission(false)
 );
 

@@ -576,6 +576,8 @@ export async function handleSetup(interaction) {
   }
 
   const gs = getGuildSettings(interaction.guildId) || {};
+
+  // Main setup (Dashboard + pings)
   const emb = new EmbedBuilder()
     .setTitle('Boss Alerts - Setup Wizard')
     .setDescription([
@@ -584,32 +586,35 @@ export async function handleSetup(interaction) {
       '2) **Ping Role** to mention when a window is near',
       '3) **Lookahead Hours** for the dashboard',
       '4) **Ping Lead Minutes** before a window opens',
-      '5) **Jorm Messages Channel** for Queue & Ring lists',
       '',
-      'Click **Create/Update Dashboard Message** and/or **Create/Update Jorm Messages** when you’re done.'
+      'Click **Create/Update Dashboard Message** when you’re done.',
+      '',
+      '➕ Jorm settings are sent in a separate panel right after this one to keep things tidy.'
     ].join('\n'))
     .addFields(
       { name: 'Current Alert Channel', value: gs.alert_channel_id ? `<#${gs.alert_channel_id}>` : '-', inline: true },
       { name: 'Current Ping Role', value: gs.ping_role_id ? `<@&${gs.ping_role_id}>` : '-', inline: true },
       { name: 'Lookahead Hours', value: String(gs.upcoming_hours ?? 3), inline: true },
-      { name: 'Ping Lead Minutes', value: String(gs.ping_minutes ?? 30), inline: true },
-      { name: 'Jorm Messages Channel', value: gs.jorm_channel_id ? `<#${gs.jorm_channel_id}>` : '-', inline: true }
+      { name: 'Ping Lead Minutes', value: String(gs.ping_minutes ?? 30), inline: true }
     )
     .setColor(0x2ECC71);
 
+  // IMPORTANT: use setChannelTypes (not addChannelTypes), and keep total rows ≤ 5
   const row1 = new ActionRowBuilder().addComponents(
     new ChannelSelectMenuBuilder()
       .setCustomId('setup:channel')
       .setPlaceholder('Select alert channel')
-      .addChannelTypes(ChannelType.GuildText)
+      .setChannelTypes(ChannelType.GuildText)
       .setMinValues(1).setMaxValues(1)
   );
+
   const row2 = new ActionRowBuilder().addComponents(
     new RoleSelectMenuBuilder()
       .setCustomId('setup:role')
       .setPlaceholder('Select ping role (optional)')
       .setMinValues(0).setMaxValues(1)
   );
+
   const row3 = new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId('setup:hours')
@@ -617,6 +622,7 @@ export async function handleSetup(interaction) {
       .addOptions([1,3,6,12,24].map(h => ({ label: `${h} hour${h===1?'':'s'}`, value: String(h) })))
       .setMinValues(1).setMaxValues(1)
   );
+
   const row4 = new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId('setup:minutes')
@@ -624,6 +630,7 @@ export async function handleSetup(interaction) {
       .addOptions([5,10,15,30,60,120].map(m => ({ label: `${m} minutes`, value: String(m) })))
       .setMinValues(1).setMaxValues(1)
   );
+
   const row5 = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId('setup:make_message')
@@ -631,14 +638,33 @@ export async function handleSetup(interaction) {
       .setStyle(ButtonStyle.Primary)
   );
 
-  // NEW: Jorm message channel + creation button
+  // Send message #1 (5 rows max)
+  await interaction.reply({
+    embeds: [emb],
+    components: [row1, row2, row3, row4, row5],
+    ephemeral: true
+  });
+
+  // Jorm panel in a separate ephemeral follow-up
+  const jormEmb = new EmbedBuilder()
+    .setTitle('Jorm Settings')
+    .setDescription([
+      'Configure where to post the **Jorm Key Queue** and **Ring FW List**.',
+      '',
+      `Current Jorm Channel: ${gs.jorm_channel_id ? `<#${gs.jorm_channel_id}>` : '-'}`,
+      '',
+      'After selecting a channel, click **Create/Update Jorm Messages**.'
+    ].join('\n'))
+    .setColor(0x3498DB);
+
   const rowJormChannel = new ActionRowBuilder().addComponents(
     new ChannelSelectMenuBuilder()
       .setCustomId('setup:jorm_channel')
       .setPlaceholder('Select channel for Jorm Queue & Ring FW')
-      .addChannelTypes(ChannelType.GuildText)
+      .setChannelTypes(ChannelType.GuildText)
       .setMinValues(1).setMaxValues(1)
   );
+
   const rowJormBtn = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId('setup:make_jorm')
@@ -646,9 +672,9 @@ export async function handleSetup(interaction) {
       .setStyle(ButtonStyle.Secondary)
   );
 
-  return interaction.reply({
-    embeds: [emb],
-    components: [row1, row2, row3, row4, row5, rowJormChannel, rowJormBtn],
+  await interaction.followUp({
+    embeds: [jormEmb],
+    components: [rowJormChannel, rowJormBtn],
     ephemeral: true
   });
 }

@@ -235,8 +235,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (focused?.name === 'family' && ['player', 'updateplayer'].includes(interaction.commandName)) {
       const query = String(focused.value || '').trim();
       const rows = findJormPlayersByName(interaction.guildId, query);
-      const choices = rows.map(r => ({ name: r.display_name || r.family_name, value: r.family_name })).slice(0, 25);
-      return interaction.respond(choices);
+
+      // Ensure every choice has a non-empty string value
+      const choices = [];
+      for (const r of rows) {
+        const label = (r.display_name || r.family_name || '').trim();
+        const value = (r.family_name || r.display_name || '').trim(); // fallback to display_name if family_name missing
+        if (!value) continue; // skip invalid rows
+        choices.push({ name: label, value });
+      }
+
+      return interaction.respond(choices.slice(0, 25));
     }
   } catch (err) {
     console.warn('Autocomplete error:', err);

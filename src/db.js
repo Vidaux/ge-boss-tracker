@@ -156,6 +156,14 @@ for (const sql of [
   try { db.prepare(sql).run(); } catch { /* already exists */ }
 }
 
+try {
+  db.exec(`
+    UPDATE jorm_players
+       SET family_name = COALESCE(NULLIF(TRIM(family_name), ''), TRIM(display_name))
+     WHERE family_name IS NULL OR TRIM(family_name) = ''
+  `);
+} catch {}
+
 /* Ensure uniqueness by (guild_id, family_name) even on older DBs */
 try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_jorm_family ON jorm_players(guild_id, family_name)`); } catch {}
 
@@ -758,17 +766,28 @@ export function jormUndo(guildId) {
 
 // --- Player lookups for /player ---
 export function getJormPlayerByFamily(guildId, familyName) {
-  const row = db.prepare(`SELECT * FROM jorm_players WHERE guild_id = ? AND family_name = ? LIMIT 1`).get(guildId, familyName);
+  const name = String(familyName || '').trim();
+  if (!name) return null;
+  const row = db.prepare(`
+    SELECT *
+      FROM jorm_players
+     WHERE guild_id = ?
+       AND (family_name = ? COLLATE NOCASE OR display_name = ? COLLATE NOCASE)
+     LIMIT 1
+  `).get(guildId, name, name);
   return row || null;
 }
 
 export function findJormPlayersByName(guildId, nameFragment) {
   const like = `%${String(nameFragment || '').trim()}%`;
   return db.prepare(`
-    SELECT family_name, display_name
+    SELECT
+      COALESCE(NULLIF(TRIM(family_name), ''), TRIM(display_name)) AS family_name,
+      display_name
       FROM jorm_players
      WHERE guild_id = ?
-       AND (family_name LIKE ? COLLATE NOCASE OR display_name LIKE ? COLLATE NOCASE)
+       AND (COALESCE(family_name, '') LIKE ? COLLATE NOCASE
+         OR COALESCE(display_name, '') LIKE ? COLLATE NOCASE)
      ORDER BY display_name
      LIMIT 10
   `).all(guildId, like, like);

@@ -119,12 +119,10 @@ CREATE TABLE IF NOT EXISTS jorm_queue_history (
 );
 `);
 
-db.exec(`CREATE INDEX IF NOT EXISTS idx_bosses_name_nocase ON bosses(name COLLATE NOCASE);`);
-db.exec(`CREATE INDEX IF NOT EXISTS idx_gbs_guild_boss ON guild_boss_state(guild_id, boss_name);`);
-db.exec(`CREATE INDEX IF NOT EXISTS idx_channel_alerts_due ON channel_alerts(guild_id, delete_after_utc);`);
-db.exec(`CREATE INDEX IF NOT EXISTS idx_jorm_queue_order ON jorm_players(guild_id, queue_order);`);
-
-// lightweight add-columns (safe if already exist)
+/* -------------------------
+   Lightweight add-column migrations
+   (MUST run before creating indexes that use the new columns)
+------------------------- */
 for (const sql of [
   `ALTER TABLE bosses ADD COLUMN parts_json TEXT`,
   `ALTER TABLE guild_settings ADD COLUMN upcoming_hours INTEGER`,
@@ -143,10 +141,20 @@ for (const sql of [
   `ALTER TABLE guild_settings ADD COLUMN jorm_channel_id TEXT`,
   `ALTER TABLE guild_settings ADD COLUMN jorm_queue_message_id TEXT`,
   `ALTER TABLE guild_settings ADD COLUMN jorm_ring_message_id TEXT`,
-  // jorm players extra columns (idempotent)
+  // jorm players extra columns (older DBs might lack these)
   `ALTER TABLE jorm_players ADD COLUMN used_key_count INTEGER`,
   `ALTER TABLE jorm_players ADD COLUMN queue_order INTEGER`
-]) { try { db.prepare(sql).run(); } catch { /* ignore */ } }
+]) {
+  try { db.prepare(sql).run(); } catch { /* column already exists */ }
+}
+
+/* -------------------------
+   Indexes (after columns exist)
+------------------------- */
+try { db.exec(`CREATE INDEX IF NOT EXISTS idx_bosses_name_nocase ON bosses(name COLLATE NOCASE);`); } catch {}
+try { db.exec(`CREATE INDEX IF NOT EXISTS idx_gbs_guild_boss ON guild_boss_state(guild_id, boss_name);`); } catch {}
+try { db.exec(`CREATE INDEX IF NOT EXISTS idx_channel_alerts_due ON channel_alerts(guild_id, delete_after_utc);`); } catch {}
+try { db.exec(`CREATE INDEX IF NOT EXISTS idx_jorm_queue_order ON jorm_players(guild_id, queue_order);`); } catch {}
 
 // --------------------------
 // Seeding bosses (per-location expansion)

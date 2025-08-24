@@ -25,9 +25,8 @@ import {
   handleSetCommandRole,
   handleSetAlert,
   handleServerReset,
-  handleJormAddPlayer,
-  handleJormUpdatePlayer,
-  handleJormRefresh
+  handlePlayerAdd,
+  handlePlayerUpdate
 } from './commands/handlers.js';
 
 import {
@@ -242,7 +241,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-// --------- Setup wizard component handlers ----------
+// --------- Setup wizard component + Jorm buttons ----------
 client.on(Events.InteractionCreate, async (interaction) => {
   if (
     !(
@@ -369,7 +368,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
-    // NEW: Create/Update Jorm messages
+    // Create/Update Jorm messages
     if (interaction.customId === 'setup:make_jorm' && interaction.isButton()) {
       const settings = getGuildSettings(interaction.guildId) || {};
       if (!settings.jorm_channel_id) {
@@ -402,14 +401,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-// Helper: allow non-admins to press Jorm buttons if you gate /jorm via setcommandrole
+// Helper: allow non-admins to press Jorm buttons if you gate with standard role
 function isAllowedByStandardForJorm(interaction) {
-  // Reuse your role-gating setup by checking the 'jorm' command name
   const gs = getGuildSettings(interaction.guildId);
-  // If jorm is gated, only that role (or admin) can use buttons; otherwise anyone can
-  // This lightweight check mirrors isAllowedForStandard in handlers:
-  const explicitRoleRow = null; // buttons aren't tied to a slash handler; keep open unless you prefer strict gating here
-  const roleToCheck = explicitRoleRow || gs?.standard_role_id;
+  const roleToCheck = gs?.standard_role_id;
   if (!roleToCheck) return true;
   return interaction.member.roles.cache.has(roleToCheck);
 }
@@ -446,14 +441,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       case 'setup':           await handleSetup(interaction); break;
       case 'setcommandrole':  await handleSetCommandRole(interaction); break;
       case 'setalert':        await handleSetAlert(interaction); break;
-      case 'jorm': {
-        const sub = interaction.options.getSubcommand();
-        if (sub === 'addplayer')        await handleJormAddPlayer(interaction);
-        else if (sub === 'updateplayer') await handleJormUpdatePlayer(interaction);
-        else if (sub === 'refresh')     await handleJormRefresh(interaction);
-        else await interaction.reply({ ephemeral: true, content: 'Unknown /jorm subcommand.' });
-        break;
-      }
+      case 'playeradd':       await handlePlayerAdd(interaction); break;
+      case 'playerupdate':    await handlePlayerUpdate(interaction); break;
       default:
         await interaction.reply({ ephemeral: true, content: 'Unknown command.' });
     }

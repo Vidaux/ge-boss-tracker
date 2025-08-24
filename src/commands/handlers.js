@@ -653,10 +653,10 @@ export async function handleSetup(interaction) {
   });
 }
 
-// ---------- Jorm commands ----------
-export async function handleJormAddPlayer(interaction) {
-  if (!isAllowedForStandard(interaction, 'jorm')) {
-    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /jorm.' });
+// ---------- Standalone player commands ----------
+export async function handlePlayerAdd(interaction) {
+  if (!isAllowedForStandard(interaction, 'playeradd')) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /playeradd.' });
   }
 
   const user = interaction.options.getUser('user', true);
@@ -668,6 +668,7 @@ export async function handleJormAddPlayer(interaction) {
     has_ring: ring ?? false
   });
 
+  // Auto-refresh Jorm messages
   bus.emit('jormUpdate', { guildId: interaction.guildId });
 
   return interaction.reply({
@@ -676,9 +677,9 @@ export async function handleJormAddPlayer(interaction) {
   });
 }
 
-export async function handleJormUpdatePlayer(interaction) {
-  if (!isAllowedForStandard(interaction, 'jorm')) {
-    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /jorm.' });
+export async function handlePlayerUpdate(interaction) {
+  if (!isAllowedForStandard(interaction, 'playerupdate')) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /playerupdate.' });
   }
 
   const user = interaction.options.getUser('user', true);
@@ -692,21 +693,14 @@ export async function handleJormUpdatePlayer(interaction) {
   });
 
   if (!ok) {
-    return interaction.reply({ ephemeral: true, content: `Player **${user}** is not in the list. Use **/jorm addplayer** first.` });
+    return interaction.reply({ ephemeral: true, content: `Player **${user}** is not in the list. Use **/playeradd** first.` });
   }
 
+  // Auto-refresh Jorm messages
   bus.emit('jormUpdate', { guildId: interaction.guildId });
 
   return interaction.reply({
     ephemeral: true,
     content: `Updated **${user}**. Belt: ${belt ?? 'no change'}, Ring: ${ring ?? 'no change'}.`
   });
-}
-
-export async function handleJormRefresh(interaction) {
-  if (!isAdminAllowed(interaction)) {
-    return interaction.reply({ ephemeral: true, content: 'You do not have permission to run /jorm refresh.' });
-  }
-  bus.emit('jormUpdate', { guildId: interaction.guildId, forceCreate: true });
-  return interaction.reply({ ephemeral: true, content: 'Refreshing Jorm Queue & Ring FW messages…' });
 }

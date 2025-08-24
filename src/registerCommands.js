@@ -154,7 +154,8 @@ const gateableCommands = [
   'status', 'details', 'drops', 'killed',
   'subscribe', 'unsubscribe', 'subscriptions',
   'upcoming', 'reset', 'serverreset', 'setup',
-  'jorm' // NEW
+  // NEW: player management
+  'playeradd', 'playerupdate'
 ];
 
 commands.push(
@@ -206,29 +207,25 @@ commands.push(
     .setDMPermission(false)
 );
 
-/** /jorm - Jormongand player tracking */
+/** Standalone: /playeradd */
 commands.push(
   new SlashCommandBuilder()
-    .setName('jorm')
-    .setDescription('Manage Jormongand player tracking and queue')
-    .addSubcommand(sc =>
-      sc.setName('addplayer')
-        .setDescription('Add a player to the Jorm list (optional belt/ring flags)')
-        .addUserOption(o => o.setName('user').setDescription('Discord user').setRequired(true))
-        .addBooleanOption(o => o.setName('belt').setDescription('Has Jormongand Belt?').setRequired(false))
-        .addBooleanOption(o => o.setName('ring').setDescription('Has Montoro Skull Ring?').setRequired(false))
-    )
-    .addSubcommand(sc =>
-      sc.setName('updateplayer')
-        .setDescription('Update a player’s belt/ring flags')
-        .addUserOption(o => o.setName('user').setDescription('Discord user').setRequired(true))
-        .addBooleanOption(o => o.setName('belt').setDescription('Has Jormongand Belt?').setRequired(false))
-        .addBooleanOption(o => o.setName('ring').setDescription('Has Montoro Skull Ring?').setRequired(false))
-    )
-    .addSubcommand(sc =>
-      sc.setName('refresh')
-        .setDescription('Admin: create or refresh Jorm Queue & Ring FW messages')
-    )
+    .setName('playeradd')
+    .setDescription('Add a player to the tracked list (belt/ring flags optional)')
+    .addUserOption(o => o.setName('user').setDescription('Discord user').setRequired(true))
+    .addBooleanOption(o => o.setName('belt').setDescription('Has Jormongand Belt?').setRequired(false))
+    .addBooleanOption(o => o.setName('ring').setDescription('Has Montoro Skull Ring?').setRequired(false))
+    .setDMPermission(false)
+);
+
+/** Standalone: /playerupdate */
+commands.push(
+  new SlashCommandBuilder()
+    .setName('playerupdate')
+    .setDescription('Update a player’s belt/ring flags')
+    .addUserOption(o => o.setName('user').setDescription('Discord user').setRequired(true))
+    .addBooleanOption(o => o.setName('belt').setDescription('Has Jormongand Belt?').setRequired(false))
+    .addBooleanOption(o => o.setName('ring').setDescription('Has Montoro Skull Ring?').setRequired(false))
     .setDMPermission(false)
 );
 

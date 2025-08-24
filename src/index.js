@@ -27,7 +27,8 @@ import {
   handleServerReset,
   handleAddPlayer,
   handleUpdatePlayer,
-  handlePlayerLookup
+  handlePlayerLookup,
+  handleRemovePlayer
 } from './commands/handlers.js';
 
 import {
@@ -231,8 +232,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return interaction.respond(names.map(n => ({ name: n, value: n })));
     }
 
-    // Family name autocomplete for /player and /updateplayer
-    if (focused?.name === 'family' && ['player', 'updateplayer'].includes(interaction.commandName)) {
+    // Autocomplete for Family Name fields in player-style commands
+    if (focused?.name === 'family' && ['player', 'updateplayer', 'removeplayer'].includes(interaction.commandName)) {
       const query = String(focused.value || '').trim();
       const rows = findJormPlayersByName(interaction.guildId, query);
 
@@ -240,8 +241,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const choices = [];
       for (const r of rows) {
         const label = (r.display_name || r.family_name || '').trim();
-        const value = (r.family_name || r.display_name || '').trim(); // fallback to display_name if family_name missing
-        if (!value) continue; // skip invalid rows
+        const value = (r.family_name || r.display_name || '').trim();
+        if (!value) continue;
         choices.push({ name: label, value });
       }
 
@@ -417,6 +418,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       case 'addplayer':       await handleAddPlayer(interaction); break;
       case 'updateplayer':    await handleUpdatePlayer(interaction); break;
       case 'player':          await handlePlayerLookup(interaction); break;
+      case 'removeplayer':    await handleRemovePlayer(interaction); break;
 
       default:
         await interaction.reply({ ephemeral: true, content: 'Unknown command.' });

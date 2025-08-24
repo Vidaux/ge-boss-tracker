@@ -22,7 +22,8 @@ import {
   listKilledBosses,
   upsertJormPlayer,
   updateJormPlayer,
-  getJormPlayerByFamily
+  getJormPlayerByFamily,
+  removeJormPlayer
 } from '../db.js';
 
 import {
@@ -668,3 +669,33 @@ export async function handlePlayerLookup(interaction) {
 
   return interaction.reply({ embeds: [embed] });
 }
+
+export async function handleRemovePlayer(interaction) {
+  if (!isAllowedForStandard(interaction, 'removeplayer')) {
+    return interaction.reply({ ephemeral: true, content: 'You do not have permission to use /removeplayer.' });
+  }
+
+  const family = (interaction.options.getString('family', true) || '').trim();
+  if (!family) {
+    return interaction.reply({ ephemeral: true, content: 'Family Name cannot be empty.' });
+  }
+
+  const existing = getJormPlayerByFamily(interaction.guildId, family);
+  if (!existing) {
+    return interaction.reply({ ephemeral: true, content: `No player found for **${family}**.` });
+  }
+
+  const res = removeJormPlayer(interaction.guildId, existing.family_name);
+  // Refresh Jorm messages if anything changed
+  if (res.removed) {
+    bus.emit('jormUpdate', { guildId: interaction.guildId });
+  }
+
+  return interaction.reply({
+    ephemeral: true,
+    content: res.removed
+      ? `Removed **${existing.family_name}** from the player list.`
+      : `Nothing was removed.`
+  });
+}
+

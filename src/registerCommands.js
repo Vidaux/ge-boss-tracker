@@ -270,6 +270,21 @@ commands.push(
     .setDMPermission(false)
 );
 
+/** /removeplayer */
+commands.push(
+  new SlashCommandBuilder()
+    .setName('removeplayer')
+    .setDescription('Remove a player (by Family Name)')
+    .addStringOption(o =>
+      o.setName('family')
+       .setDescription('Family Name')
+       .setRequired(true)
+       .setAutocomplete(true)
+    )
+    .setDMPermission(false)
+);
+
+
 const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
 
 async function register() {

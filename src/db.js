@@ -793,4 +793,46 @@ export function findJormPlayersByName(guildId, nameFragment) {
   `).all(guildId, like, like);
 }
 
+export function removeJormPlayer(guildId, familyName) {
+  const fam = String(familyName || '').trim();
+  if (!fam) return { removed: false };
+
+  const row = db.prepare(`
+    SELECT family_name, has_belt, queue_order
+      FROM jorm_players
+     WHERE guild_id = ? AND family_name = ? COLLATE NOCASE
+     LIMIT 1
+  `).get(guildId, fam);
+
+  if (!row) return { removed: false };
+
+  const tx = db.transaction(() => {
+    // Delete the player
+    db.prepare(`
+      DELETE FROM jorm_players
+       WHERE guild_id = ? AND family_name = ? COLLATE NOCASE
+    `).run(guildId, row.family_name);
+
+    // If they were in the active queue (no belt), compact queue_order
+    if (Number(row.has_belt) === 0 && row.queue_order != null) {
+      db.prepare(`
+        UPDATE jorm_players
+           SET queue_order = queue_order - 1
+         WHERE guild_id = ?
+           AND has_belt = 0
+           AND queue_order > ?
+      `).run(guildId, row.queue_order);
+    }
+
+    // (Optional) Purge history for this family — comment out if you want to keep it
+    db.prepare(`
+      DELETE FROM jorm_queue_history
+       WHERE guild_id = ? AND family_name = ? COLLATE NOCASE
+    `).run(guildId, row.family_name);
+  });
+
+  tx();
+  return { removed: true, name: row.family_name };
+}
+
 export default db;

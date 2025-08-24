@@ -521,6 +521,45 @@
     "reset_respawn_max_hours": 5
   },
   {
+    "name": "Ancient King of Greed",
+    "location": [
+      "Bahamar, Ancient Cave Ch.1",
+      "Bahamar, Ancient Cave Ch.2"
+    ],
+    "respawn_min_hours": 3.5,
+    "respawn_max_hours": 5,
+    "special_conditions": "None",
+    "stats": {
+      "Max HP": 2419200,
+      "A.R.": 57,
+      "ATK": 5896,
+      "D.R.": 57,
+      "DEF": 188,
+      "Fire RES": 30,
+      "Ice RES": 30,
+      "Lightning RES": 30,
+      "Mental RES": 30,
+      "Type": "Undead"
+    },
+    "drops": [
+      "Random Unique Equip",
+      "Random Normal Equip",
+      "Enchant Chips lvl 92-100",
+      "Pure Gold Bar",
+      "Level 84 Elite equip recipe",
+      "Level 84 Elite equips",
+      "Level 92 Elite armor recipe",
+      "Golden series weapon recipe",
+      "Recipe - Dragon Heart"
+    ],
+    "respawn_notes": [
+      "Spawns 3 hours 30 mins ~ 5 hours after server restart",
+      "Spawns 3 hours 30 mins ~ 5 hours after death"
+    ],
+    "reset_respawn_min_hours": 3.5,
+    "reset_respawn_max_hours": 5
+  },
+  {
     "name": "Swamp Angler",
     "location": [
       "Bahamar Dark Swamp",
